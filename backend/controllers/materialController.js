@@ -1,17 +1,43 @@
 /**
  * controllers/materialController.js — Material upload, browsing, deletion
+ *
+ * Department-based approval workflow:
+ *   On upload → find the active Faculty Admin for the material's department.
+ *               Set assignedAdmin automatically. Send notification to Faculty Admin.
  */
 
 const Material = require('../models/Material');
+const User = require('../models/User');
+const Department = require('../models/Department');
 const { uploadBuffer, deleteFile } = require('../services/cloudinaryService');
+const { notifyFacultyAdminOnUpload } = require('../services/notificationService');
 const { success, createError } = require('../utils/apiResponse');
 
-// ─── GET /api/materials?courseId=&type= ───────────────────────────────
+// ─── Helper: resolve department name from departmentId ─────────────────
+const resolveDeptName = async (departmentId) => {
+  try {
+    const dept = await Department.findById(departmentId);
+    return dept ? dept.name : '';
+  } catch (_) {
+    return '';
+  }
+};
+
+// ─── Helper: find active Faculty Admin for a given departmentId ────────
+const findFacultyAdminForDept = async (departmentId) => {
+  return User.findOne({
+    role: 'faculty_admin',
+    status: 'active',
+    departmentId,
+  });
+};
+
+// ─── GET /api/materials?courseId=&type= ────────────────────────────────
 // Returns approved materials only (public browsing for students)
 const getMaterials = async (req, res) => {
   const { courseId, type } = req.query;
 
-  const filter = { status: 'approved' };
+  const filter = { approvalStatus: 'approved' };
   if (courseId) filter.courseId = courseId;
   if (type) filter.type = type;
 
@@ -22,7 +48,8 @@ const getMaterials = async (req, res) => {
 // ─── GET /api/materials/my ─────────────────────────────────────────────
 // Returns ALL materials uploaded by the authenticated user (any status)
 const getMyMaterials = async (req, res) => {
-  const materials = await Material.find({ uploadedBy: req.user._id }).sort({ createdAt: -1 });
+  const materials = await Material.find({ uploadedBy: req.user._id })
+    .sort({ createdAt: -1 });
   res.json(success(materials, 'Your materials fetched successfully.'));
 };
 
@@ -34,7 +61,8 @@ const getMaterialById = async (req, res) => {
 };
 
 // ─── POST /api/materials ───────────────────────────────────────────────
-// contributor / admin — creates a new material with optional file upload
+// Contributor uploads material. Automatically assigns the Faculty Admin
+// for the material's department and sends them a notification.
 const createMaterial = async (req, res) => {
   const { title, description, type, videoLink, courseId, departmentId } = req.body;
 
@@ -46,15 +74,19 @@ const createMaterial = async (req, res) => {
     throw createError('type must be notes, assignment, or video.', 400);
   }
 
-  // For file-based types, a file upload is required
   if (type !== 'video' && !req.file) {
     throw createError('A file is required for notes and assignment types.', 400);
   }
 
-  // For video type, a link is required
   if (type === 'video' && !videoLink) {
     throw createError('A video link is required for video type.', 400);
   }
+
+  // Resolve department name
+  const departmentName = await resolveDeptName(departmentId);
+
+  // Auto-assign Faculty Admin for this department
+  const facultyAdmin = await findFacultyAdminForDept(departmentId);
 
   const materialData = {
     title,
@@ -62,41 +94,50 @@ const createMaterial = async (req, res) => {
     type,
     courseId,
     departmentId,
+    department: departmentName,
     uploadedBy: req.user._id,
     contributorName: req.user.name,
+    approvalStatus: 'pending',
     status: 'pending',
+    assignedAdmin: facultyAdmin ? facultyAdmin._id : null,
+    assignedAdminName: facultyAdmin ? facultyAdmin.name : null,
   };
 
-  // Stream the in-memory buffer to Cloudinary
   if (req.file) {
     const { url, publicId } = await uploadBuffer(req.file.buffer, 'edushare/materials');
     materialData.fileUrl = url;
     materialData.filePublicId = publicId;
   }
 
-  if (videoLink) {
-    materialData.videoLink = videoLink;
-  }
+  if (videoLink) materialData.videoLink = videoLink;
 
   const material = await Material.create(materialData);
 
-  res.status(201).json(success(material, 'Material submitted for review. Awaiting admin approval.'));
+  // ── Send notification to Faculty Admin (fire-and-forget) ──────────────
+  notifyFacultyAdminOnUpload({ material, uploader: req.user });
+
+  const msg = facultyAdmin
+    ? `Material submitted for review. Assigned to ${facultyAdmin.name}.`
+    : 'Material submitted. No Faculty Admin is currently assigned — a Super Admin will review it.';
+
+  res.status(201).json(success(material, msg));
 };
 
 // ─── DELETE /api/materials/:id ─────────────────────────────────────────
-// contributor (own materials only) or admin (any material)
 const deleteMaterial = async (req, res) => {
   const material = await Material.findById(req.params.id);
   if (!material) throw createError('Material not found.', 404);
 
-  // Contributors can only delete their own materials
-  if (req.user.role === 'contributor' && material.uploadedBy.toString() !== req.user._id.toString()) {
+  if (
+    req.user.role === 'contributor' &&
+    material.uploadedBy.toString() !== req.user._id.toString()
+  ) {
     throw createError('You can only delete your own materials.', 403);
   }
 
-  // Clean up the file from Cloudinary if it exists
   if (material.filePublicId) {
-    const resourceType = material.type === 'notes' || material.type === 'assignment' ? 'raw' : 'image';
+    const resourceType =
+      material.type === 'notes' || material.type === 'assignment' ? 'raw' : 'image';
     await deleteFile(material.filePublicId, resourceType);
   }
 
@@ -105,4 +146,10 @@ const deleteMaterial = async (req, res) => {
   res.json(success(null, 'Material deleted successfully.'));
 };
 
-module.exports = { getMaterials, getMyMaterials, getMaterialById, createMaterial, deleteMaterial };
+module.exports = {
+  getMaterials,
+  getMyMaterials,
+  getMaterialById,
+  createMaterial,
+  deleteMaterial,
+};

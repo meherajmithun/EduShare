@@ -4,9 +4,10 @@ const { getUsers, getUserById, updateUserRole, deleteUser } = require('../contro
 const { protect } = require('../middleware/auth');
 const roleGuard = require('../middleware/roleGuard');
 
-router.use(protect, roleGuard('admin'));
+// Admin, Faculty Admin (dept-scoped in controller), and Super Admin may manage users
+router.use(protect, roleGuard('admin', 'faculty_admin', 'super_admin'));
 
-router.get('/', getUsers);           // ?role=student|contributor|admin
+router.get('/', getUsers);              // ?role=... &status=...
 router.get('/:id', getUserById);
 router.put('/:id/role', updateUserRole);
 router.delete('/:id', deleteUser);

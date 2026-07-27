@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  network_security_config.xml
+  ───────────────────────────────────────────────────────────────────────
+  Allows cleartext (plain HTTP) traffic ONLY to:
+    • 10.0.2.2  — Android Emulator localhost alias
+    • 192.168.0.137  — Development machine LAN IP (physical device)
+
+  All other traffic defaults to HTTPS enforcement.
+  Replace the LAN IP here when your machine IP changes.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <!-- Android emulator → host machine -->
+        <domain includeSubdomains="false">10.0.2.2</domain>
+        <!-- Physical device → host machine LAN IP -->
+        <domain includeSubdomains="false">192.168.0.137</domain>
+    </domain-config>
+</network-security-config>

@@ -1,5 +1,17 @@
 /**
  * models/User.js — Mongoose schema for registered users
+ *
+ * Roles:
+ *   student       — default, read-only access
+ *   contributor   — can upload materials
+ *   admin         — legacy admin (kept for backward compatibility)
+ *   faculty_admin — department-scoped admin, requires Super Admin approval
+ *   super_admin   — global admin, manages Faculty Admins and all departments
+ *
+ * Status (used for Faculty Admin approval workflow):
+ *   active  — fully active account (default for student/contributor/admin/super_admin)
+ *   pending — Faculty Admin registration awaiting Super Admin approval
+ *   disabled — account suspended by Super Admin
  */
 
 const mongoose = require('mongoose');
@@ -31,16 +43,54 @@ const userSchema = new mongoose.Schema(
     role: {
       type: String,
       enum: {
-        values: ['student', 'contributor', 'admin'],
-        message: 'Role must be student, contributor, or admin',
+        values: ['student', 'contributor', 'admin', 'faculty_admin', 'super_admin'],
+        message: 'Role must be student, contributor, admin, faculty_admin, or super_admin',
       },
       default: 'student',
     },
+
+    // ─── Account status (Faculty Admin approval workflow) ──────────────────
+    status: {
+      type: String,
+      enum: {
+        values: ['active', 'pending', 'disabled'],
+        message: 'Status must be active, pending, or disabled',
+      },
+      default: 'active',
+    },
+
+    // ─── Department ────────────────────────────────────────────────────────
+    // Plain string kept for all roles (legacy + readability).
     department: {
       type: String,
-      required: [true, 'Department is required'],
       trim: true,
+      default: '',
     },
+    // ObjectId reference to Department document (used for Faculty Admin scoping).
+    departmentId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Department',
+      default: null,
+    },
+
+    // ─── Faculty Admin extra fields ────────────────────────────────────────
+    facultyId: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    designation: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    profilePhotoUrl: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+
+    // ─── Soft-delete flag ──────────────────────────────────────────────────
     isActive: {
       type: Boolean,
       default: true,

@@ -12,7 +12,12 @@ const roleGuard = require('../middleware/roleGuard');
 const { upload } = require('../services/cloudinaryService');
 
 // IMPORTANT: /my must come before /:id to avoid route conflict
-router.get('/my', protect, roleGuard('contributor', 'admin'), getMyMaterials);
+router.get(
+  '/my',
+  protect,
+  roleGuard('contributor', 'admin', 'faculty_admin', 'super_admin'),
+  getMyMaterials
+);
 router.get('/', protect, getMaterials);          // ?courseId=&type=
 router.get('/:id', protect, getMaterialById);
 
@@ -20,11 +25,16 @@ router.get('/:id', protect, getMaterialById);
 router.post(
   '/',
   protect,
-  roleGuard('contributor', 'admin'),
+  roleGuard('contributor', 'admin', 'faculty_admin', 'super_admin'),
   upload.single('file'),
   createMaterial
 );
 
-router.delete('/:id', protect, roleGuard('contributor', 'admin'), deleteMaterial);
+router.delete(
+  '/:id',
+  protect,
+  roleGuard('contributor', 'admin', 'faculty_admin', 'super_admin'),
+  deleteMaterial
+);
 
 module.exports = router;

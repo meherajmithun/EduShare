@@ -1,15 +1,27 @@
 /**
- * controllers/userController.js — User management (admin only)
+ * controllers/userController.js — User management
+ *
+ * Super Admin: can manage all users across all roles.
+ * Faculty Admin: can view only users in their own department.
+ * Legacy Admin: global access (backward compatibility).
  */
 
 const User = require('../models/User');
 const { success, createError } = require('../utils/apiResponse');
 
+const VALID_ROLES = ['student', 'contributor', 'admin', 'faculty_admin', 'super_admin'];
+
 // ─── GET /api/users ────────────────────────────────────────────────────
 const getUsers = async (req, res) => {
-  const { role } = req.query;
-  const filter = { isActive: true };
+  const { role, status } = req.query;
+  const filter = {};
   if (role) filter.role = role;
+  if (status) filter.status = status;
+
+  // Faculty Admin scoping — only see their own department
+  if (req.user.role === 'faculty_admin' && req.user.department) {
+    filter.department = req.user.department;
+  }
 
   const users = await User.find(filter).sort({ createdAt: -1 }).select('-password');
   res.json(success(users, 'Users fetched successfully.'));
@@ -19,21 +31,31 @@ const getUsers = async (req, res) => {
 const getUserById = async (req, res) => {
   const user = await User.findById(req.params.id).select('-password');
   if (!user) throw createError('User not found.', 404);
+
+  // Faculty Admin scope check
+  if (req.user.role === 'faculty_admin' && user.department !== req.user.department) {
+    throw createError('Access denied. User is not in your department.', 403);
+  }
+
   res.json(success(user));
 };
 
 // ─── PUT /api/users/:id/role ───────────────────────────────────────────
-// Change a user's role (admin only)
 const updateUserRole = async (req, res) => {
   const { role } = req.body;
   if (!role) throw createError('Role is required.', 400);
-  if (!['student', 'contributor', 'admin'].includes(role)) {
-    throw createError('Role must be student, contributor, or admin.', 400);
+  if (!VALID_ROLES.includes(role)) {
+    throw createError(`Role must be one of: ${VALID_ROLES.join(', ')}.`, 400);
   }
 
-  // Prevent an admin from changing their own role
+  // Prevent self-role-change
   if (req.params.id === req.user._id.toString()) {
     throw createError('You cannot change your own role.', 400);
+  }
+
+  // Only Super Admin can assign super_admin or faculty_admin roles
+  if (['super_admin', 'faculty_admin'].includes(role) && req.user.role !== 'super_admin') {
+    throw createError('Only Super Admin can assign super_admin or faculty_admin roles.', 403);
   }
 
   const user = await User.findByIdAndUpdate(

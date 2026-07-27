@@ -1,8 +1,14 @@
 /**
  * models/Material.js — Mongoose schema for academic materials
  *
- * A material is either a file (notes/assignment — stored on Cloudinary)
- * or a video link (YouTube / Google Drive URL).
+ * Department-based approval workflow:
+ *   1. Contributor uploads → backend finds active Faculty Admin for that dept
+ *   2. assignedAdmin is set automatically
+ *   3. Only that Faculty Admin sees the material in their pending queue
+ *   4. On approve/reject, approvedBy/approvedAt/rejectionReason are stored
+ *
+ * approvalStatus mirrors status — kept separate so we can add
+ * granular states in the future without breaking the `status` enum.
  */
 
 const mongoose = require('mongoose');
@@ -55,6 +61,12 @@ const materialSchema = new mongoose.Schema(
       ref: 'Department',
       required: [true, 'Department reference is required'],
     },
+    // Denormalised department name — used for fast filtering in admin views
+    department: {
+      type: String,
+      trim: true,
+      default: '',
+    },
     // Reference to the contributing user
     uploadedBy: {
       type: mongoose.Schema.Types.ObjectId,
@@ -67,6 +79,23 @@ const materialSchema = new mongoose.Schema(
       required: [true, 'Contributor name is required'],
       trim: true,
     },
+
+    // ─── Approval workflow fields ──────────────────────────────────────
+
+    // approvalStatus is the canonical status for this workflow.
+    // 'pending'  — awaiting review from the assigned Faculty Admin
+    // 'approved' — approved by Faculty Admin or Super Admin
+    // 'rejected' — rejected; rejectionReason is populated
+    approvalStatus: {
+      type: String,
+      enum: {
+        values: ['pending', 'approved', 'rejected'],
+        message: 'approvalStatus must be pending, approved, or rejected',
+      },
+      default: 'pending',
+    },
+
+    // Legacy field kept for backward compatibility — always mirrors approvalStatus
     status: {
       type: String,
       enum: {
@@ -74,6 +103,42 @@ const materialSchema = new mongoose.Schema(
         message: 'Status must be pending, approved, or rejected',
       },
       default: 'pending',
+    },
+
+    // The Faculty Admin assigned to review this material.
+    // Set automatically on upload based on the material's department.
+    // Null if no Faculty Admin is active for that department.
+    assignedAdmin: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    // Denormalised name of the assigned admin for display purposes
+    assignedAdminName: {
+      type: String,
+      default: null,
+    },
+
+    // Who ultimately approved or rejected (Faculty Admin or Super Admin)
+    approvedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    approvedByName: {
+      type: String,
+      default: null,
+    },
+    approvedAt: {
+      type: Date,
+      default: null,
+    },
+
+    // Populated when approvalStatus = 'rejected'
+    rejectionReason: {
+      type: String,
+      trim: true,
+      default: null,
     },
   },
   {
@@ -84,6 +149,8 @@ const materialSchema = new mongoose.Schema(
         ret.courseId = ret.courseId?.toString?.() ?? ret.courseId;
         ret.departmentId = ret.departmentId?.toString?.() ?? ret.departmentId;
         ret.uploadedBy = ret.uploadedBy?.toString?.() ?? ret.uploadedBy;
+        ret.assignedAdmin = ret.assignedAdmin?.toString?.() ?? ret.assignedAdmin;
+        ret.approvedBy = ret.approvedBy?.toString?.() ?? ret.approvedBy;
         delete ret._id;
         delete ret.__v;
         delete ret.filePublicId; // Internal field, never sent to clients
@@ -94,9 +161,10 @@ const materialSchema = new mongoose.Schema(
 );
 
 // ─── Indexes ──────────────────────────────────────────────────────────
-// Speed up the most common query patterns
-materialSchema.index({ courseId: 1, status: 1 });
+materialSchema.index({ courseId: 1, approvalStatus: 1 });
 materialSchema.index({ uploadedBy: 1 });
-materialSchema.index({ status: 1 });
+materialSchema.index({ approvalStatus: 1 });
+materialSchema.index({ assignedAdmin: 1, approvalStatus: 1 }); // Faculty Admin queue
+materialSchema.index({ departmentId: 1, approvalStatus: 1 });
 
 module.exports = mongoose.model('Material', materialSchema);
