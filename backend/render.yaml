@@ -1,0 +1,57 @@
+# render.yaml — Render deployment configuration for EduShare API
+#
+# Deploy instructions:
+#   1. Push the backend/ folder to a GitHub repository.
+#   2. Connect the repo in Render → New Web Service.
+#   3. Render will read this file automatically.
+#   4. Set all `sync: false` env vars manually in the Render dashboard.
+#
+# Root directory on Render: backend
+# Build command:            npm install
+# Start command:            npm start
+
+services:
+  - type: web
+    name: edushare-api
+    env: node
+    plan: free
+    rootDir: backend          # Path relative to repo root — adjust if repo root IS the backend folder
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+
+    envVars:
+      # ── Server ──────────────────────────────────────────────────────
+      - key: NODE_ENV
+        value: production
+
+      # ── MongoDB Atlas ────────────────────────────────────────────────
+      # Set this in the Render dashboard → Environment tab
+      # Format: mongodb+srv://<user>:<pass>@<cluster>.mongodb.net/<dbname>?retryWrites=true&w=majority
+      - key: MONGO_URI
+        sync: false
+
+      # ── JWT ──────────────────────────────────────────────────────────
+      # IMPORTANT: Set this ONCE manually — do NOT use generateValue.
+      # generateValue creates a new secret on every deploy, which invalidates
+      # all existing user tokens and forces every user to log in again.
+      # Generate your own: node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_EXPIRES_IN
+        value: 7d
+
+      # ── Cloudinary ───────────────────────────────────────────────────
+      # All three values are on your Cloudinary dashboard → Settings → API Keys
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+
+      # ── CORS ─────────────────────────────────────────────────────────
+      # Leave blank to allow all origins (correct for a Flutter mobile API).
+      # If you want to restrict, set a comma-separated list of allowed origins.
+      - key: ALLOWED_ORIGINS
+        value: ""
