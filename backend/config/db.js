@@ -18,6 +18,26 @@ const connectDB = async () => {
     });
 
     console.log(`✅  MongoDB connected: ${conn.connection.host}`);
+
+    // Auto-seed Super Admin if one does not exist yet
+    const User = require('../models/User');
+    const existingSuperAdmin = await User.findOne({ role: 'super_admin' });
+    if (!existingSuperAdmin) {
+      const email = process.env.SUPER_ADMIN_EMAIL || 'superadmin@bubt.edu.bd';
+      const password = process.env.SUPER_ADMIN_PASSWORD || 'SuperAdminPassword123';
+      const name = process.env.SUPER_ADMIN_NAME || 'Super Admin';
+
+      await User.create({
+        name,
+        email: email.toLowerCase().trim(),
+        password,
+        role: 'super_admin',
+        status: 'active',
+        department: 'All Departments',
+        isActive: true,
+      });
+      console.log(`✅  Super Admin account auto-created: ${email}`);
+    }
   } catch (error) {
     console.error(`❌  MongoDB connection failed: ${error.message}`);
     process.exit(1); // Kill the process — app cannot run without DB

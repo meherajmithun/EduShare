@@ -50,6 +50,14 @@ services:
       - key: CLOUDINARY_API_SECRET
         sync: false
 
+      # ── Super Admin Seeder ──────────────────────────────────────────
+      - key: SUPER_ADMIN_NAME
+        value: Super Admin
+      - key: SUPER_ADMIN_EMAIL
+        value: superadmin@bubt.edu.bd
+      - key: SUPER_ADMIN_PASSWORD
+        sync: false
+
       # ── CORS ─────────────────────────────────────────────────────────
       # Leave blank to allow all origins (correct for a Flutter mobile API).
       # If you want to restrict, set a comma-separated list of allowed origins.
