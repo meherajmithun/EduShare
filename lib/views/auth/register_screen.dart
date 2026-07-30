@@ -86,26 +86,25 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
     if (_isFacultyAdmin) {
       // Faculty Admin registration — no auto-login
-      if (_selectedDepartmentId == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Please select a department'),
-            backgroundColor: const Color(0xFFEF4444),
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          ),
+      final String? error;
+      if (_selectedDepartmentId != null) {
+        error = await authService.registerFacultyAdmin(
+          name: _nameController.text.trim(),
+          facultyId: _facultyIdController.text.trim(),
+          email: _emailController.text.trim(),
+          password: _passwordController.text,
+          departmentId: _selectedDepartmentId!,
+          designation: _designationController.text.trim(),
         );
-        return;
+      } else {
+        error = await authService.register(
+          name: _nameController.text.trim(),
+          email: _emailController.text.trim(),
+          password: _passwordController.text,
+          department: _selectedDepartment,
+          role: 'faculty_admin',
+        );
       }
-
-      final error = await authService.registerFacultyAdmin(
-        name: _nameController.text.trim(),
-        facultyId: _facultyIdController.text.trim(),
-        email: _emailController.text.trim(),
-        password: _passwordController.text,
-        departmentId: _selectedDepartmentId!,
-        designation: _designationController.text.trim(),
-      );
 
       if (error != null) {
         if (mounted) _showError(error);
