@@ -36,16 +36,18 @@ const isAllowedEmail = (email) => {
   return false;
 };
 
-// ─── Valid self-registerable roles (super_admin/faculty_admin use dedicated endpoint) ──
-const SELF_REGISTER_ROLES = ['student', 'contributor', 'admin'];
+// ─── Valid self-registerable roles ──
+const SELF_REGISTER_ROLES = ['student', 'contributor', 'admin', 'faculty_admin'];
 
 // ─── POST /api/auth/register ──────────────────────────────────────────
 //
 // Contributor workflow:
 //   status = 'pending' → no JWT issued → Faculty Admin notified.
+//   Admin workflow:
+//   status = 'pending' → no JWT issued → Super Admin notified.
 //   Student workflow: status = 'active' → JWT issued immediately.
 const register = async (req, res) => {
-  const { name, email, password, role, department } = req.body;
+  const { name, email, password, role, department, facultyId, designation } = req.body;
 
   if (!name || !email || !password || !role || !department) {
     throw createError('All fields are required: name, email, password, role, department.', 400);
@@ -59,10 +61,10 @@ const register = async (req, res) => {
     throw createError('Only university emails are allowed (e.g. name@bubt.edu.bd).', 400);
   }
 
-  // Block super_admin and faculty_admin self-registration via this endpoint
+  // Block super_admin self-registration via this endpoint
   if (!SELF_REGISTER_ROLES.includes(role)) {
     throw createError(
-      'Invalid role. Use the Admin registration form for the Admin role.',
+      'Invalid role selected.',
       400
     );
   }
@@ -109,6 +111,8 @@ const register = async (req, res) => {
       password,
       role: 'faculty_admin',
       department,
+      facultyId: facultyId || '',
+      designation: designation || '',
       status: 'pending', // Blocked until Super Admin approves
     });
 
