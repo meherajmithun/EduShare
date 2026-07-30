@@ -21,7 +21,7 @@ import 'package:edushare/views/admin/faculty_admins_screen.dart';
 ///   Contributor   → Home · Search · Upload · My Uploads · Profile
 ///   Admin         → Dashboard · Approvals · Materials · Users · Profile
 ///   Faculty Admin → Dashboard · Approvals · Materials · Users · Profile
-///   Super Admin   → Dashboard · Faculty Admins · Users · Profile
+///   Super Admin   → Dashboard · Admins · Users · Profile
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
 
@@ -114,7 +114,7 @@ class _MainShellState extends State<MainShell> {
             screen: AdminDashboardScreen(),
           ),
           _TabItem(
-            label: 'Faculty Admins',
+            label: 'Admins',
             icon: Icons.admin_panel_settings_outlined,
             selectedIcon: Icons.admin_panel_settings_rounded,
             screen: FacultyAdminsScreen(),

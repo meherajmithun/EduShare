@@ -65,6 +65,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             _pending = (stats['pendingCount'] as num?)?.toInt() ?? 0;
             _approved = (stats['approvedCount'] as num?)?.toInt() ?? 0;
             _rejected = (stats['rejectedCount'] as num?)?.toInt() ?? 0;
+            _pendingFacultyAdmins = (stats['pendingContributors'] as num?)?.toInt() ?? 0;
             _isLoading = false;
           });
         }
@@ -173,8 +174,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     ),
                     const SizedBox(height: 24),
 
-                    // ── Super Admin pending Faculty Admins banner ────
-                    if (isSuperAdmin && _pendingFacultyAdmins > 0) ...[
+                    // ── Pending approval request banner ────
+                    if (_pendingFacultyAdmins > 0) ...[
                       Container(
                         width: double.infinity,
                         padding: const EdgeInsets.all(14),
@@ -191,7 +192,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                             const SizedBox(width: 10),
                             Expanded(
                               child: Text(
-                                '$_pendingFacultyAdmins Faculty Admin registration${_pendingFacultyAdmins > 1 ? 's' : ''} awaiting your approval.',
+                                isSuperAdmin
+                                    ? '$_pendingFacultyAdmins Faculty Admin registration${_pendingFacultyAdmins > 1 ? 's' : ''} awaiting your approval.'
+                                    : '$_pendingFacultyAdmins Contributor registration${_pendingFacultyAdmins > 1 ? 's' : ''} awaiting your approval.',
                                 style: theme.textTheme.bodyMedium?.copyWith(
                                   color: const Color(0xFFF59E0B),
                                   fontWeight: FontWeight.w600,

@@ -10,6 +10,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:edushare/core/app_config.dart';
 import 'package:edushare/core/exceptions/app_exception.dart';
@@ -150,12 +151,15 @@ class ApiClient {
     }
   }
 
-  /// Multipart POST for file uploads (PDF, DOCX, etc.)
-  /// [filePath] is the absolute path to the file on the device.
-  /// [fields] are additional text form fields sent alongside the file.
-  Future<dynamic> postMultipart(
+  /// Multipart POST for file uploads using raw bytes.
+  /// [bytes] — the file content as Uint8List (always available via FilePicker withData:true).
+  /// [fileName] — the original file name (used as Content-Disposition filename).
+  /// [fileField] — the multipart field name expected by the server (e.g. 'file').
+  /// [fields] — additional text form fields sent alongside the file.
+  Future<dynamic> postMultipartBytes(
     String path, {
-    required String filePath,
+    required Uint8List bytes,
+    required String fileName,
     required String fileField,
     Map<String, String>? fields,
   }) async {
@@ -170,7 +174,13 @@ class ApiClient {
     if (fields != null) request.fields.addAll(fields);
 
     try {
-      request.files.add(await http.MultipartFile.fromPath(fileField, filePath));
+      request.files.add(
+        http.MultipartFile.fromBytes(
+          fileField,
+          bytes,
+          filename: fileName,
+        ),
+      );
 
       final streamedResponse =
           await request.send().timeout(AppConfig.uploadTimeout);

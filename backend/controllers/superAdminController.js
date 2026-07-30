@@ -1,111 +1,135 @@
 /**
- * controllers/superAdminController.js — Super Admin management of Faculty Admins
+ * controllers/superAdminController.js — Super Admin management of Admins
  *
  * All endpoints require role = 'super_admin'.
  *
- * Faculty Admin lifecycle:
+ * Admin lifecycle (backend role = faculty_admin, shown as "Admin" in the Flutter UI):
  *   register (pending) → approve (active) → disable / delete
- *                      → reject (deleted)
+ *                      → reject (status = 'rejected', record kept, reason stored)
  */
 
 const User = require('../models/User');
 const Material = require('../models/Material');
 const { success, createError } = require('../utils/apiResponse');
+const {
+  notifyAdminOnApproval,
+  notifyAdminOnRejection,
+} = require('../services/notificationService');
 
 // ─── GET /api/super-admin/faculty-admins/pending ───────────────────────
-// List all Faculty Admins awaiting approval
+// List all Admins awaiting approval
 const getPendingFacultyAdmins = async (req, res) => {
-  const pending = await User.find({ role: 'faculty_admin', status: 'pending' })
+  const pending = await User.find({ role: { $in: ['faculty_admin', 'admin'] }, status: 'pending' })
     .sort({ createdAt: 1 })
     .select('-password');
-  res.json(success(pending, 'Pending Faculty Admin registrations fetched.'));
+  res.json(success(pending, 'Pending Admin registrations fetched.'));
 };
 
 // ─── GET /api/super-admin/faculty-admins ──────────────────────────────
-// List all Faculty Admins (any status)
+// List all Admins (any status). Pass ?status=pending|active|disabled|rejected
 const getAllFacultyAdmins = async (req, res) => {
   const { status } = req.query;
-  const filter = { role: 'faculty_admin' };
+  const filter = { role: { $in: ['faculty_admin', 'admin'] } };
   if (status) filter.status = status;
 
   const admins = await User.find(filter)
     .sort({ createdAt: -1 })
     .select('-password');
-  res.json(success(admins, 'Faculty Admins fetched.'));
+  res.json(success(admins, 'Admins fetched.'));
 };
 
 // ─── PUT /api/super-admin/faculty-admins/:id/approve ──────────────────
-// Approve a pending Faculty Admin → status becomes 'active'
+// Approve a pending Admin → status becomes 'active'.
+// Sets verifiedBy/verifiedAt. Notifies the Admin.
 const approveFacultyAdmin = async (req, res) => {
-  const admin = await User.findOne({ _id: req.params.id, role: 'faculty_admin' });
-  if (!admin) throw createError('Faculty Admin not found.', 404);
+  const admin = await User.findOne({ _id: req.params.id, role: { $in: ['faculty_admin', 'admin'] } });
+  if (!admin) throw createError('Admin not found.', 404);
 
   if (admin.status === 'active') {
-    throw createError('This Faculty Admin is already approved.', 400);
+    throw createError('This Admin is already approved.', 400);
   }
 
   admin.status = 'active';
+  admin.verifiedBy = req.user._id;
+  admin.verifiedAt = new Date();
+  admin.rejectionReason = null;
   await admin.save();
 
-  res.json(success(admin.toJSON(), 'Faculty Admin approved successfully. They can now log in.'));
+  // ── Notify the Admin (fire-and-forget) ────────────────────────────────
+  notifyAdminOnApproval({ admin, superAdmin: req.user });
+
+  res.json(success(admin.toJSON(), 'Admin approved successfully. They can now log in.'));
 };
 
 // ─── PUT /api/super-admin/faculty-admins/:id/reject ───────────────────
-// Reject a pending registration — removes the user record entirely
+// Reject a pending Admin.
+// Status becomes 'rejected', reason is stored, record is KEPT for audit.
+// Notifies the Admin with the rejection reason.
 const rejectFacultyAdmin = async (req, res) => {
-  const admin = await User.findOne({ _id: req.params.id, role: 'faculty_admin' });
-  if (!admin) throw createError('Faculty Admin not found.', 404);
+  const admin = await User.findOne({ _id: req.params.id, role: { $in: ['faculty_admin', 'admin'] } });
+  if (!admin) throw createError('Admin not found.', 404);
 
   if (admin.status !== 'pending') {
     throw createError('Only pending registrations can be rejected.', 400);
   }
 
-  await User.findByIdAndDelete(req.params.id);
+  const reason = (req.body.reason && req.body.reason.trim())
+    ? req.body.reason.trim()
+    : 'No reason provided.';
 
-  res.json(success(null, 'Faculty Admin registration rejected and removed.'));
+  admin.status = 'rejected';
+  admin.verifiedBy = req.user._id;
+  admin.verifiedAt = new Date();
+  admin.rejectionReason = reason;
+  await admin.save();
+
+  // ── Notify the Admin (fire-and-forget) ────────────────────────────────
+  notifyAdminOnRejection({ admin, superAdmin: req.user, reason });
+
+  res.json(success(admin.toJSON(), 'Admin registration rejected.'));
 };
 
 // ─── PUT /api/super-admin/faculty-admins/:id/disable ──────────────────
-// Disable an active Faculty Admin (reversible)
+// Disable an active Admin (reversible)
 const disableFacultyAdmin = async (req, res) => {
-  const admin = await User.findOne({ _id: req.params.id, role: 'faculty_admin' });
-  if (!admin) throw createError('Faculty Admin not found.', 404);
+  const admin = await User.findOne({ _id: req.params.id, role: { $in: ['faculty_admin', 'admin'] } });
+  if (!admin) throw createError('Admin not found.', 404);
 
   if (admin.status === 'disabled') {
-    throw createError('This Faculty Admin is already disabled.', 400);
+    throw createError('This Admin is already disabled.', 400);
   }
 
   admin.status = 'disabled';
   await admin.save();
 
-  res.json(success(admin.toJSON(), 'Faculty Admin has been disabled.'));
+  res.json(success(admin.toJSON(), 'Admin has been disabled.'));
 };
 
 // ─── PUT /api/super-admin/faculty-admins/:id/enable ───────────────────
-// Re-enable a disabled Faculty Admin
+// Re-enable a disabled Admin
 const enableFacultyAdmin = async (req, res) => {
-  const admin = await User.findOne({ _id: req.params.id, role: 'faculty_admin' });
-  if (!admin) throw createError('Faculty Admin not found.', 404);
+  const admin = await User.findOne({ _id: req.params.id, role: { $in: ['faculty_admin', 'admin'] } });
+  if (!admin) throw createError('Admin not found.', 404);
 
   if (admin.status !== 'disabled') {
-    throw createError('Only disabled Faculty Admins can be re-enabled.', 400);
+    throw createError('Only disabled Admins can be re-enabled.', 400);
   }
 
   admin.status = 'active';
   await admin.save();
 
-  res.json(success(admin.toJSON(), 'Faculty Admin has been re-enabled.'));
+  res.json(success(admin.toJSON(), 'Admin has been re-enabled.'));
 };
 
 // ─── DELETE /api/super-admin/faculty-admins/:id ────────────────────────
-// Hard delete a Faculty Admin account
+// Hard delete an Admin account
 const deleteFacultyAdmin = async (req, res) => {
-  const admin = await User.findOne({ _id: req.params.id, role: 'faculty_admin' });
-  if (!admin) throw createError('Faculty Admin not found.', 404);
+  const admin = await User.findOne({ _id: req.params.id, role: { $in: ['faculty_admin', 'admin'] } });
+  if (!admin) throw createError('Admin not found.', 404);
 
   await User.findByIdAndDelete(req.params.id);
 
-  res.json(success(null, 'Faculty Admin account permanently deleted.'));
+  res.json(success(null, 'Admin account permanently deleted.'));
 };
 
 // ─── GET /api/super-admin/stats ────────────────────────────────────────
@@ -114,9 +138,9 @@ const getSuperAdminStats = async (req, res) => {
   const [
     totalStudents,
     totalContributors,
-    totalFacultyAdmins,
-    pendingFacultyAdmins,
-    disabledFacultyAdmins,
+    totalAdmins,
+    pendingAdmins,
+    disabledAdmins,
     totalMaterials,
     pendingMaterials,
     approvedMaterials,
@@ -139,10 +163,15 @@ const getSuperAdminStats = async (req, res) => {
         users: {
           totalStudents,
           totalContributors,
-          totalFacultyAdmins,
-          pendingFacultyAdmins,
-          disabledFacultyAdmins,
-          total: totalStudents + totalContributors + totalFacultyAdmins,
+          // "Admin" in UI = faculty_admin role
+          totalAdmins,
+          pendingAdmins,
+          disabledAdmins,
+          // Legacy aliases kept for backward compat with existing Flutter screens
+          totalFacultyAdmins: totalAdmins,
+          pendingFacultyAdmins: pendingAdmins,
+          disabledFacultyAdmins: disabledAdmins,
+          total: totalStudents + totalContributors + totalAdmins,
         },
         materials: {
           total: totalMaterials,

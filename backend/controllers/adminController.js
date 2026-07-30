@@ -19,6 +19,8 @@ const User = require('../models/User');
 const {
   notifyContributorOnApproval,
   notifyContributorOnRejection,
+  notifyContributorOnAccountApproval,
+  notifyContributorOnAccountRejection,
 } = require('../services/notificationService');
 const { success, createError } = require('../utils/apiResponse');
 
@@ -105,23 +107,24 @@ const getStats = async (req, res) => {
   let matFilter = {};
   let userFilter = {};
 
-  if (req.user.role === 'faculty_admin') {
+  if (req.user.role === 'faculty_admin' || req.user.role === 'admin') {
     matFilter.assignedAdmin = req.user._id;
     userFilter.department = req.user.department;
   }
 
-  const [totalUsers, totalMaterials, pendingCount, approvedCount, rejectedCount] =
+  const [totalUsers, totalMaterials, pendingCount, approvedCount, rejectedCount, pendingContributors] =
     await Promise.all([
       User.countDocuments({ ...userFilter, isActive: true, status: 'active' }),
       Material.countDocuments(matFilter),
       Material.countDocuments({ ...matFilter, approvalStatus: 'pending' }),
       Material.countDocuments({ ...matFilter, approvalStatus: 'approved' }),
       Material.countDocuments({ ...matFilter, approvalStatus: 'rejected' }),
+      User.countDocuments({ ...userFilter, role: 'contributor', status: 'pending' }),
     ]);
 
   res.json(
     success(
-      { totalUsers, totalMaterials, pendingCount, approvedCount, rejectedCount },
+      { totalUsers, totalMaterials, pendingCount, approvedCount, rejectedCount, pendingContributors },
       'Stats fetched.'
     )
   );
@@ -142,10 +145,90 @@ const getAllMaterials = async (req, res) => {
   res.json(success(materials, 'All materials fetched.'));
 };
 
+// ─── GET /api/admin/pending-contributors ────────────────────────────────
+const getPendingContributors = async (req, res) => {
+  const filter = { role: 'contributor', status: 'pending' };
+
+  // Faculty Admin sees only their department; super/legacy admin sees all
+  if (req.user.role === 'faculty_admin') {
+    filter.department = req.user.department;
+  }
+
+  const contributors = await User.find(filter)
+    .sort({ createdAt: 1 })
+    .select('-password');
+  res.json(success(contributors, 'Pending contributors fetched.'));
+};
+
+// ─── PUT /api/admin/contributors/:id/approve ──────────────────────────
+const approveContributor = async (req, res) => {
+  const contributor = await User.findOne({ _id: req.params.id, role: 'contributor' });
+  if (!contributor) throw createError('Contributor not found.', 404);
+
+  // Faculty Admin can only approve contributors from their own department
+  if (
+    req.user.role === 'faculty_admin' &&
+    contributor.department !== req.user.department
+  ) {
+    throw createError('Access denied. This contributor is not in your department.', 403);
+  }
+
+  if (contributor.status === 'active') {
+    throw createError('This contributor is already approved.', 400);
+  }
+
+  contributor.status = 'active';
+  contributor.verifiedBy = req.user._id;
+  contributor.verifiedAt = new Date();
+  contributor.rejectionReason = null;
+  await contributor.save();
+
+  // Notify contributor (fire-and-forget)
+  notifyContributorOnAccountApproval({ contributor, admin: req.user });
+
+  res.json(success(contributor.toJSON(), 'Contributor approved. They can now log in and upload materials.'));
+};
+
+// ─── PUT /api/admin/contributors/:id/reject ───────────────────────────
+const rejectContributor = async (req, res) => {
+  const { reason } = req.body;
+
+  const contributor = await User.findOne({ _id: req.params.id, role: 'contributor' });
+  if (!contributor) throw createError('Contributor not found.', 404);
+
+  // Faculty Admin can only reject contributors from their own department
+  if (
+    req.user.role === 'faculty_admin' &&
+    contributor.department !== req.user.department
+  ) {
+    throw createError('Access denied. This contributor is not in your department.', 403);
+  }
+
+  if (contributor.status === 'rejected') {
+    throw createError('This contributor registration is already rejected.', 400);
+  }
+
+  const rejectionReason = reason && reason.trim() ? reason.trim() : 'No reason provided.';
+
+  contributor.status = 'rejected';
+  contributor.verifiedBy = req.user._id;
+  contributor.verifiedAt = new Date();
+  contributor.rejectionReason = rejectionReason;
+  await contributor.save();
+
+  // Notify contributor (fire-and-forget)
+  notifyContributorOnAccountRejection({ contributor, admin: req.user, reason: rejectionReason });
+
+  res.json(success(contributor.toJSON(), 'Contributor registration rejected.'));
+};
+
 module.exports = {
   getPendingMaterials,
   approveMaterial,
   rejectMaterial,
   getStats,
   getAllMaterials,
+  getPendingContributors,
+  approveContributor,
+  rejectContributor,
 };

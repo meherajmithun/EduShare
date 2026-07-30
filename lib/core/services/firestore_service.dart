@@ -3,6 +3,7 @@
 /// Method signatures are IDENTICAL to the previous mock version wherever
 /// screens already use them. New Super Admin methods added at the bottom.
 
+import 'dart:typed_data';
 import 'package:edushare/core/services/api_client.dart';
 import 'package:edushare/models/department_model.dart';
 import 'package:edushare/models/course_model.dart';
@@ -83,12 +84,20 @@ class FirestoreService {
   }
 
   // ─── Material upload ──────────────────────────────────────────────────
+  //
+  // Uses bytes-based multipart upload for cross-platform compatibility.
+  // FilePicker must be called with withData: true so bytes is always populated.
 
-  Future<void> uploadMaterial(MaterialModel material, {String? filePath}) async {
-    if (filePath != null && material.type != 'video') {
-      await _api.postMultipart(
+  Future<void> uploadMaterial(
+    MaterialModel material, {
+    Uint8List? fileBytes,
+    String? fileName,
+  }) async {
+    if (fileBytes != null && material.type != 'video') {
+      await _api.postMultipartBytes(
         '/api/materials',
-        filePath: filePath,
+        bytes: fileBytes,
+        fileName: fileName ?? 'upload',
         fileField: 'file',
         fields: {
           'title': material.title,
@@ -138,6 +147,27 @@ class FirestoreService {
     return data as Map<String, dynamic>;
   }
 
+  // ─── Contributor management (Faculty Admin) ───────────────────────────
+
+  /// Fetch contributors with status = pending in the Faculty Admin's department.
+  Future<List<UserModel>> getPendingContributors() async {
+    final data = await _api.get('/api/admin/pending-contributors') as List<dynamic>;
+    return data.map((e) => UserModel.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  /// Approve a pending contributor account.
+  Future<void> approveContributor(String id) async {
+    await _api.put('/api/admin/contributors/$id/approve', {});
+  }
+
+  /// Reject a pending contributor account with an optional reason.
+  Future<void> rejectContributor(String id, {String? reason}) async {
+    await _api.put(
+      '/api/admin/contributors/$id/reject',
+      reason != null && reason.trim().isNotEmpty ? {'reason': reason.trim()} : {},
+    );
+  }
+
   // ─── Super Admin — Faculty Admin management ───────────────────────────
 
   Future<List<UserModel>> getPendingFacultyAdmins() async {
@@ -156,8 +186,9 @@ class FirestoreService {
     await _api.put('/api/super-admin/faculty-admins/$id/approve', {});
   }
 
-  Future<void> rejectFacultyAdmin(String id) async {
-    await _api.put('/api/super-admin/faculty-admins/$id/reject', {});
+  Future<void> rejectFacultyAdmin(String id, {String? reason}) async {
+    await _api.put('/api/super-admin/faculty-admins/$id/reject',
+        reason != null && reason.trim().isNotEmpty ? {'reason': reason.trim()} : {});
   }
 
   Future<void> disableFacultyAdmin(String id) async {

@@ -1,19 +1,25 @@
 /**
  * controllers/authController.js — Register, Login, Profile
  *
- * Supports 5 roles: student, contributor, admin (legacy), faculty_admin, super_admin
+ * Roles visible in UI: student, contributor, Admin (= faculty_admin backend role)
+ * Roles hidden from UI: super_admin (seeded only), admin (legacy)
  *
- * Faculty Admin registration is a SEPARATE endpoint that:
+ * Admin ("faculty_admin") registration:
  *  - Sets status = 'pending'
- *  - Does NOT return a JWT (user must await Super Admin approval)
+ *  - Does NOT return a JWT (must await Super Admin approval)
+ *  - Sends a notification to the Super Admin
  *
- * Login blocks accounts with status = 'pending' or 'disabled'.
+ * Login blocks accounts with status = 'pending', 'rejected', or 'disabled'.
  */
 
 const User = require('../models/User');
 const Department = require('../models/Department');
 const { signToken } = require('../middleware/auth');
 const { success, fail, createError } = require('../utils/apiResponse');
+const {
+  notifySuperAdminOnNewAdmin,
+  notifyFacultyAdminOnContributorRegistration,
+} = require('../services/notificationService');
 
 // ─── Allowed university email domains ─────────────────────────────────
 const ALLOWED_DOMAINS = ['bubt.edu.bd'];
@@ -30,14 +36,17 @@ const isAllowedEmail = (email) => {
   return false;
 };
 
-// ─── Valid self-registerable roles (super_admin can only be seeded) ────
+// ─── Valid self-registerable roles (super_admin/faculty_admin use dedicated endpoint) ──
 const SELF_REGISTER_ROLES = ['student', 'contributor', 'admin'];
 
 // ─── POST /api/auth/register ──────────────────────────────────────────
+//
+// Contributor workflow:
+//   status = 'pending' → no JWT issued → Faculty Admin notified.
+//   Student workflow: status = 'active' → JWT issued immediately.
 const register = async (req, res) => {
   const { name, email, password, role, department } = req.body;
 
-  // Field validation
   if (!name || !email || !password || !role || !department) {
     throw createError('All fields are required: name, email, password, role, department.', 400);
   }
@@ -46,28 +55,76 @@ const register = async (req, res) => {
     throw createError('Password must be at least 6 characters.', 400);
   }
 
-  // University email enforcement
   if (!isAllowedEmail(email)) {
     throw createError('Only university emails are allowed (e.g. name@bubt.edu.bd).', 400);
   }
 
-  // Role validation — block super_admin self-registration
+  // Block super_admin and faculty_admin self-registration via this endpoint
   if (!SELF_REGISTER_ROLES.includes(role)) {
     throw createError(
-      'Invalid role. Use the Faculty Admin registration form for faculty_admin role.',
+      'Invalid role. Use the Admin registration form for the Admin role.',
       400
     );
   }
 
-  // Check for duplicate email
   const existing = await User.findOne({ email: email.toLowerCase().trim() });
   if (existing) {
     throw createError('An account with this email already exists. Please log in instead.', 409);
   }
 
-  // Create user — password is hashed in the pre-save hook
-  const user = await User.create({ name, email, password, role, department, status: 'active' });
+  // ── Contributor → pending approval ──────────────────────────────────────
+  if (role === 'contributor') {
+    const contributor = await User.create({
+      name,
+      email,
+      password,
+      role: 'contributor',
+      department,
+      status: 'pending', // Blocked until Faculty Admin approves
+    });
 
+    // Find the active Faculty Admin for this department (by name match)
+    const facultyAdmin = await User.findOne({
+      role: { $in: ['faculty_admin', 'admin'] },
+      status: 'active',
+      department,
+    });
+
+    // Notify Faculty Admin (fire-and-forget)
+    notifyFacultyAdminOnContributorRegistration({ contributor, facultyAdmin });
+
+    return res.status(201).json(
+      success(
+        { pending: true, userId: contributor._id.toString() },
+        'Registration submitted. Your account is pending Faculty Admin approval. You will be notified once approved.'
+      )
+    );
+  }
+
+  // ── Admin / Faculty Admin → pending approval ──────────────────────────────
+  if (role === 'admin' || role === 'faculty_admin') {
+    const adminUser = await User.create({
+      name,
+      email,
+      password,
+      role: 'faculty_admin',
+      department,
+      status: 'pending', // Blocked until Super Admin approves
+    });
+
+    // Notify Super Admin (fire-and-forget)
+    notifySuperAdminOnNewAdmin({ newAdmin: adminUser });
+
+    return res.status(201).json(
+      success(
+        { pending: true, userId: adminUser._id.toString() },
+        'Admin registration submitted successfully. Awaiting Super Admin approval.'
+      )
+    );
+  }
+
+  // ── Student → active immediately ───────────────────────────────────────
+  const user = await User.create({ name, email, password, role, department, status: 'active' });
   const token = signToken(user._id);
 
   res.status(201).json(
@@ -76,12 +133,12 @@ const register = async (req, res) => {
 };
 
 // ─── POST /api/auth/register-faculty-admin ────────────────────────────
-// Submits a Faculty Admin registration request (status = pending).
-// Does NOT return a JWT — user must be approved by Super Admin first.
+// Submits an Admin registration request (status = pending).
+// Does NOT return a JWT — must be approved by Super Admin first.
+// Notifies the Super Admin automatically.
 const registerFacultyAdmin = async (req, res) => {
   const { name, facultyId, email, password, departmentId, designation, profilePhotoUrl } = req.body;
 
-  // Required fields
   if (!name || !facultyId || !email || !password || !departmentId || !designation) {
     throw createError(
       'All fields are required: name, facultyId, email, password, departmentId, designation.',
@@ -97,19 +154,17 @@ const registerFacultyAdmin = async (req, res) => {
     throw createError('Only university emails are allowed (e.g. name@bubt.edu.bd).', 400);
   }
 
-  // Resolve department name from ID
   const dept = await Department.findById(departmentId);
   if (!dept) {
     throw createError('Selected department not found.', 404);
   }
 
-  // Check for duplicate email
   const existing = await User.findOne({ email: email.toLowerCase().trim() });
   if (existing) {
     throw createError('An account with this email already exists.', 409);
   }
 
-  // Create pending Faculty Admin
+  // Create pending Admin (backend role = faculty_admin, shown as "Admin" in UI)
   const user = await User.create({
     name,
     email,
@@ -124,10 +179,13 @@ const registerFacultyAdmin = async (req, res) => {
     isActive: true,
   });
 
+  // ── Notify the Super Admin (fire-and-forget) ────────────────────────
+  notifySuperAdminOnNewAdmin({ newAdmin: user });
+
   res.status(201).json(
     success(
       { userId: user._id.toString() },
-      'Faculty Admin registration submitted successfully. Awaiting Super Admin approval.'
+      'Admin registration submitted successfully. Awaiting Super Admin approval.'
     )
   );
 };
@@ -140,44 +198,65 @@ const login = async (req, res) => {
     throw createError('Email, password, and role are required.', 400);
   }
 
-  // Validate role string
   const validRoles = ['student', 'contributor', 'admin', 'faculty_admin', 'super_admin'];
   if (!validRoles.includes(role)) {
     throw createError('Invalid role selected.', 400);
   }
 
-  // Fetch user WITH password (select: false by default)
   const user = await User.findOne({ email: email.toLowerCase().trim() }).select('+password');
 
   if (!user) {
     throw createError('Invalid credentials. Please check your email and password.', 401);
   }
 
-  // Verify password
   const passwordMatch = await user.comparePassword(password);
   if (!passwordMatch) {
     throw createError('Invalid credentials. Please check your email and password.', 401);
   }
 
-  // Role check — must match exactly
+  // Role check — allow super_admin to log in via the 'faculty_admin' / Admin UI chip
   if (user.role !== role) {
+    if (user.role === 'super_admin' && (role === 'faculty_admin' || role === 'admin')) {
+      // Allowed: Super Admin logs in via the "Admin" chip since Super Admin is hidden from UI
+    } else {
+      throw createError(
+        `Selected role does not match your registered account. You registered as "${user.role}".`,
+        401
+      );
+    }
+  }
+
+  // Status check — block pending, rejected, and disabled accounts
+  if (user.status === 'pending') {
+    if (user.role === 'contributor') {
+      throw createError(
+        'Your contributor account is pending Faculty Admin approval. You will be notified once approved.',
+        403
+      );
+    }
     throw createError(
-      `Selected role does not match your registered account. You registered as "${user.role}".`,
-      401
+      'Your Admin registration is pending Super Admin approval. You will be notified once approved.',
+      403
     );
   }
 
-  // Status check — block pending and disabled accounts
-  if (user.status === 'pending') {
+  if (user.status === 'rejected') {
+    const reason = user.rejectionReason || 'No reason provided.';
+    if (user.role === 'contributor') {
+      throw createError(
+        `Your contributor registration was rejected. Reason: ${reason}`,
+        403
+      );
+    }
     throw createError(
-      'Your Faculty Admin registration is pending Super Admin approval. You will be notified once approved.',
+      `Your Admin registration was rejected. Reason: ${reason}`,
       403
     );
   }
 
   if (user.status === 'disabled') {
     throw createError(
-      'Your account has been disabled. Please contact the Super Admin.',
+      'Your account has been disabled. Please contact the administrator.',
       403
     );
   }
@@ -187,7 +266,6 @@ const login = async (req, res) => {
   }
 
   const token = signToken(user._id);
-
   const userJSON = user.toJSON();
 
   res.json(success({ token, user: userJSON }, 'Logged in successfully.'));

@@ -5,9 +5,9 @@ import 'package:edushare/models/user_model.dart';
 import 'package:edushare/core/role_helper.dart';
 import 'package:edushare/widgets/glass_card.dart';
 
-/// Super Admin screen to manage Faculty Admin registrations.
-/// Tab 0: Pending (approve / reject)
-/// Tab 1: All Faculty Admins (disable / enable / delete)
+/// Super Admin screen to manage Admin registrations.
+/// Tab 0: Pending (approve / reject with reason)
+/// Tab 1: All Admins (disable / enable / delete)
 class FacultyAdminsScreen extends StatefulWidget {
   const FacultyAdminsScreen({Key? key}) : super(key: key);
 
@@ -75,17 +75,14 @@ class _FacultyAdminsScreenState extends State<FacultyAdminsScreen>
   }
 
   Future<void> _reject(UserModel admin) async {
-    final confirmed = await _confirmDialog(
-      'Reject Registration',
-      'Reject ${admin.name}\'s Faculty Admin application? This will permanently remove their registration.',
-      confirmLabel: 'Reject',
-      confirmColor: const Color(0xFFEF4444),
-    );
-    if (!confirmed) return;
+    // Collect rejection reason via dialog
+    final reason = await _rejectReasonDialog(admin.name);
+    if (reason == null) return; // user cancelled
 
     setState(() => _processingIds.add(admin.uid));
     try {
-      await _service.rejectFacultyAdmin(admin.uid);
+      await _service.rejectFacultyAdmin(admin.uid,
+          reason: reason.trim().isNotEmpty ? reason.trim() : null);
       setState(() {
         _pending.removeWhere((u) => u.uid == admin.uid);
         _processingIds.remove(admin.uid);
@@ -100,7 +97,7 @@ class _FacultyAdminsScreenState extends State<FacultyAdminsScreen>
   Future<void> _disable(UserModel admin) async {
     final confirmed = await _confirmDialog(
       'Disable Account',
-      'Disable ${admin.name}\'s Faculty Admin account? They will not be able to log in.',
+      'Disable ${admin.name}\'s Admin account? They will not be able to log in.',
       confirmLabel: 'Disable',
       confirmColor: const Color(0xFFF59E0B),
     );
@@ -134,7 +131,7 @@ class _FacultyAdminsScreenState extends State<FacultyAdminsScreen>
   Future<void> _delete(UserModel admin) async {
     final confirmed = await _confirmDialog(
       'Delete Account',
-      'Permanently delete ${admin.name}\'s Faculty Admin account? This cannot be undone.',
+      'Permanently delete ${admin.name}\'s Admin account? This cannot be undone.',
       confirmLabel: 'Delete',
       confirmColor: const Color(0xFFEF4444),
     );
@@ -183,6 +180,56 @@ class _FacultyAdminsScreenState extends State<FacultyAdminsScreen>
         false;
   }
 
+  /// Shows a dialog asking for a rejection reason.
+  /// Returns the entered string (possibly empty) if user taps Reject,
+  /// or null if user cancelled.
+  Future<String?> _rejectReasonDialog(String adminName) async {
+    final reasonController = TextEditingController();
+    final result = await showDialog<String?>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('Reject Registration',
+              style: TextStyle(fontWeight: FontWeight.bold)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('You are rejecting $adminName\'s Admin application.'),
+              const SizedBox(height: 14),
+              TextField(
+                controller: reasonController,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: 'Reason (optional)',
+                  hintText: 'e.g. Incomplete information provided',
+                  border: OutlineInputBorder(),
+                  alignLabelWithHint: true,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, null),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFEF4444)),
+              onPressed: () => Navigator.pop(ctx, reasonController.text),
+              child: const Text('Reject',
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      },
+    );
+    reasonController.dispose();
+    return result;
+  }
+
   void _showSnack(String msg, Color color) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -204,7 +251,7 @@ class _FacultyAdminsScreenState extends State<FacultyAdminsScreen>
             const Icon(Icons.admin_panel_settings_rounded,
                 color: AppTheme.primaryColor, size: 24),
             const SizedBox(width: 10),
-            Text('Faculty Admins',
+            Text('Admins',
                 style: theme.textTheme.titleLarge
                     ?.copyWith(fontWeight: FontWeight.bold)),
           ],
@@ -304,7 +351,7 @@ class _PendingTab extends StatelessWidget {
                     .titleMedium
                     ?.copyWith(fontWeight: FontWeight.bold)),
             const SizedBox(height: 6),
-            Text('No pending Faculty Admin registrations.',
+            Text('No pending Admin registrations.',
                 style: Theme.of(context).textTheme.bodyMedium),
           ],
         ),
@@ -409,7 +456,7 @@ class _AllTab extends StatelessWidget {
             const Icon(Icons.people_outline_rounded,
                 size: 60, color: AppTheme.primaryColor),
             const SizedBox(height: 14),
-            Text('No Faculty Admins yet.',
+            Text('No Admins yet.',
                 style: Theme.of(context)
                     .textTheme
                     .titleMedium

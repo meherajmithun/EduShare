@@ -17,9 +17,13 @@ class AuthService extends ChangeNotifier {
 
   UserModel? _currentUser;
   bool _isLoading = false;
+  /// True when the last register() call resulted in a pending contributor account.
+  /// Reset to false on the next register() call.
+  bool _isLastRegistrationPending = false;
 
   UserModel? get currentUser => _currentUser;
   bool get isLoading => _isLoading;
+  bool get isLastRegistrationPending => _isLastRegistrationPending;
 
   // ─── Allowed university email domains (client-side pre-validation) ─────
   static const List<String> allowedDomains = ['bubt.edu.bd'];
@@ -100,7 +104,12 @@ class AuthService extends ChangeNotifier {
     }
   }
 
-  // ─── Register (student, contributor, legacy admin) ─────────────────────
+  // ─── Register (student, contributor, legacy admin) ──────────────────────
+  //
+  // Contributor path: backend returns {pending:true} — no token issued.
+  //   _isLastRegistrationPending is set to true so the caller can navigate
+  //   to a pending screen instead of MainShell.
+  // Student path: backend returns {token, user} — logged in immediately.
   Future<String?> register({
     required String name,
     required String email,
@@ -111,6 +120,7 @@ class AuthService extends ChangeNotifier {
     final emailError = validateEmail(email);
     if (emailError != null) return emailError;
 
+    _isLastRegistrationPending = false;
     _isLoading = true;
     notifyListeners();
 
@@ -127,6 +137,15 @@ class AuthService extends ChangeNotifier {
         auth: false,
       );
 
+      // Contributor pending path — no token in response
+      if (data is Map && data['pending'] == true) {
+        _isLastRegistrationPending = true;
+        _isLoading = false;
+        notifyListeners();
+        return null; // success, but pending
+      }
+
+      // Active path (student / legacy admin)
       final token = data['token'] as String;
       final user = UserModel.fromJson(data['user'] as Map<String, dynamic>);
 

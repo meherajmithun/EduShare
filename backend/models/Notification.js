@@ -2,11 +2,15 @@
  * models/Notification.js — In-app notification schema
  *
  * Notification types:
- *   upload_assigned   — Faculty Admin receives this when a contributor uploads
- *                       to their department
- *   material_approved — Contributor receives this when their material is approved
- *   material_rejected — Contributor receives this when their material is rejected
- *                       (includes rejectionReason in the message)
+ *   upload_assigned          — Admin receives this when a contributor uploads to their department
+ *   material_approved        — Contributor receives this when their material is approved
+ *   material_rejected        — Contributor receives this when their material is rejected
+ *   admin_registered         — Super Admin receives this when a new Admin registers (pending)
+ *   admin_approved           — Admin receives this when Super Admin approves their account
+ *   admin_rejected           — Admin receives this when Super Admin rejects their account
+ *   contributor_registered   — Faculty Admin notified when a contributor registers for their dept
+ *   contributor_approved     — Contributor notified when Faculty Admin approves their account
+ *   contributor_rejected     — Contributor notified when Faculty Admin rejects their account
  */
 
 const mongoose = require('mongoose');
@@ -21,16 +25,16 @@ const notificationSchema = new mongoose.Schema(
       index: true,
     },
 
-    // Who triggered the notification (uploader or approving admin)
+    // Who triggered the notification (uploader or approving admin; null for system notifications)
     sender: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
-      required: [true, 'Sender is required'],
+      default: null,
     },
     senderName: {
       type: String,
-      required: true,
       trim: true,
+      default: 'System',
     },
 
     // Short notification heading
@@ -53,7 +57,17 @@ const notificationSchema = new mongoose.Schema(
     type: {
       type: String,
       enum: {
-        values: ['upload_assigned', 'material_approved', 'material_rejected'],
+        values: [
+          'upload_assigned',
+          'material_approved',
+          'material_rejected',
+          'admin_registered',
+          'admin_approved',
+          'admin_rejected',
+          'contributor_registered',
+          'contributor_approved',
+          'contributor_rejected',
+        ],
         message: 'Invalid notification type',
       },
       required: true,

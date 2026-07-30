@@ -8,12 +8,9 @@ import 'package:edushare/models/material_model.dart';
 import 'package:edushare/models/user_model.dart';
 import 'package:edushare/widgets/glass_card.dart';
 
-/// Material approval screen for admin-class roles.
-///
-/// Faculty Admin: sees only materials where assignedAdmin == their ID.
-/// Super Admin / Legacy Admin: sees all pending materials.
-///
-/// Reject action prompts for a rejection reason before submitting.
+/// Approval screen for admin-class roles with tabs:
+/// - Tab 0: Materials (pending material uploads)
+/// - Tab 1: Contributors (pending contributor registrations)
 class ApprovalsScreen extends StatefulWidget {
   const ApprovalsScreen({Key? key}) : super(key: key);
 
@@ -21,41 +18,70 @@ class ApprovalsScreen extends StatefulWidget {
   State<ApprovalsScreen> createState() => _ApprovalsScreenState();
 }
 
-class _ApprovalsScreenState extends State<ApprovalsScreen> {
+class _ApprovalsScreenState extends State<ApprovalsScreen>
+    with SingleTickerProviderStateMixin {
   final FirestoreService _service = FirestoreService();
-  List<MaterialModel> _pending = [];
-  bool _isLoading = true;
+  late TabController _tabController;
+
+  List<MaterialModel> _pendingMaterials = [];
+  List<UserModel> _pendingContributors = [];
+  bool _isLoadingMaterials = true;
+  bool _isLoadingContributors = true;
   final Set<String> _processingIds = {};
 
   @override
   void initState() {
     super.initState();
-    _loadPending();
+    _tabController = TabController(length: 2, vsync: this);
+    _loadMaterials();
+    _loadContributors();
   }
 
-  Future<void> _loadPending() async {
-    setState(() => _isLoading = true);
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadMaterials() async {
+    setState(() => _isLoadingMaterials = true);
     try {
-      final pending = await _service.getPendingMaterials();
+      final materials = await _service.getPendingMaterials();
       if (mounted) {
         setState(() {
-          _pending = pending;
-          _isLoading = false;
+          _pendingMaterials = materials;
+          _isLoadingMaterials = false;
         });
       }
     } catch (_) {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoadingMaterials = false);
     }
   }
 
-  // ── Approve ────────────────────────────────────────────────────────────
-  Future<void> _approve(MaterialModel mat) async {
+  Future<void> _loadContributors() async {
+    setState(() => _isLoadingContributors = true);
+    try {
+      final contributors = await _service.getPendingContributors();
+      if (mounted) {
+        setState(() {
+          _pendingContributors = contributors;
+          _isLoadingContributors = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _isLoadingContributors = false);
+    }
+  }
+
+  // ── Material Actions ───────────────────────────────────────────────────
+
+  Future<void> _approveMaterial(MaterialModel mat) async {
     setState(() => _processingIds.add(mat.id));
     try {
       await _service.updateMaterialStatus(mat.id, 'approved');
       if (mounted) {
         setState(() {
-          _pending.removeWhere((m) => m.id == mat.id);
+          _pendingMaterials.removeWhere((m) => m.id == mat.id);
           _processingIds.remove(mat.id);
         });
         _showSnack('Material approved successfully.', const Color(0xFF10B981));
@@ -63,22 +89,21 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
     } catch (e) {
       if (mounted) {
         setState(() => _processingIds.remove(mat.id));
-        _showSnack('Failed to approve: $e', const Color(0xFFEF4444));
+        _showSnack('Failed to approve material: $e', const Color(0xFFEF4444));
       }
     }
   }
 
-  // ── Reject — prompts for reason ────────────────────────────────────────
-  Future<void> _reject(MaterialModel mat) async {
-    final reason = await _showRejectDialog(mat.title);
-    if (reason == null) return; // User cancelled
+  Future<void> _rejectMaterial(MaterialModel mat) async {
+    final reason = await _showRejectDialog('Material', mat.title);
+    if (reason == null) return;
 
     setState(() => _processingIds.add(mat.id));
     try {
       await _service.updateMaterialStatus(mat.id, 'rejected', reason: reason);
       if (mounted) {
         setState(() {
-          _pending.removeWhere((m) => m.id == mat.id);
+          _pendingMaterials.removeWhere((m) => m.id == mat.id);
           _processingIds.remove(mat.id);
         });
         _showSnack('Material rejected.', const Color(0xFFEF4444));
@@ -86,23 +111,67 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
     } catch (e) {
       if (mounted) {
         setState(() => _processingIds.remove(mat.id));
-        _showSnack('Failed to reject: $e', const Color(0xFFEF4444));
+        _showSnack('Failed to reject material: $e', const Color(0xFFEF4444));
       }
     }
   }
 
-  // ── Rejection reason dialog ────────────────────────────────────────────
-  Future<String?> _showRejectDialog(String title) async {
+  // ── Contributor Actions ───────────────────────────────────────────────
+
+  Future<void> _approveContributor(UserModel user) async {
+    setState(() => _processingIds.add(user.uid));
+    try {
+      await _service.approveContributor(user.uid);
+      if (mounted) {
+        setState(() {
+          _pendingContributors.removeWhere((u) => u.uid == user.uid);
+          _processingIds.remove(user.uid);
+        });
+        _showSnack('${user.name} approved as Contributor.', const Color(0xFF10B981));
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _processingIds.remove(user.uid));
+        _showSnack('Failed to approve contributor: $e', const Color(0xFFEF4444));
+      }
+    }
+  }
+
+  Future<void> _rejectContributor(UserModel user) async {
+    final reason = await _showRejectDialog('Contributor', user.name);
+    if (reason == null) return;
+
+    setState(() => _processingIds.add(user.uid));
+    try {
+      await _service.rejectContributor(user.uid, reason: reason);
+      if (mounted) {
+        setState(() {
+          _pendingContributors.removeWhere((u) => u.uid == user.uid);
+          _processingIds.remove(user.uid);
+        });
+        _showSnack('${user.name}\'s registration rejected.', const Color(0xFFEF4444));
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _processingIds.remove(user.uid));
+        _showSnack('Failed to reject contributor: $e', const Color(0xFFEF4444));
+      }
+    }
+  }
+
+  // ── Rejection Dialog ──────────────────────────────────────────────────
+
+  Future<String?> _showRejectDialog(String type, String nameOrTitle) async {
     final controller = TextEditingController();
     return showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Row(
+        title: Row(
           children: [
-            Icon(Icons.cancel_outlined, color: Color(0xFFEF4444), size: 22),
-            SizedBox(width: 8),
-            Text('Reject Material',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            const Icon(Icons.cancel_outlined, color: Color(0xFFEF4444), size: 22),
+            const SizedBox(width: 8),
+            Text('Reject $type',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
           ],
         ),
         content: Column(
@@ -110,7 +179,7 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              '"$title"',
+              '"$nameOrTitle"',
               style: TextStyle(
                   fontStyle: FontStyle.italic,
                   fontSize: 13,
@@ -184,96 +253,149 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
           style: theme.textTheme.titleLarge
               ?.copyWith(fontWeight: FontWeight.bold),
         ),
-        actions: [
-          if (!_isLoading)
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF59E0B).withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0xFFF59E0B)),
-                ),
-                child: Text('${_pending.length} pending',
-                    style: const TextStyle(
-                        color: Color(0xFFF59E0B),
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12)),
+        bottom: TabBar(
+          controller: _tabController,
+          labelColor: AppTheme.primaryColor,
+          indicatorColor: AppTheme.primaryColor,
+          unselectedLabelColor: theme.disabledColor,
+          tabs: [
+            Tab(
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.folder_outlined, size: 16),
+                  const SizedBox(width: 6),
+                  Text('Materials (${_pendingMaterials.length})'),
+                ],
               ),
             ),
-          IconButton(
-            icon: const Icon(Icons.refresh_rounded),
-            onPressed: _loadPending,
-            tooltip: 'Refresh',
+            Tab(
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.person_outline_rounded, size: 16),
+                  const SizedBox(width: 6),
+                  Text('Contributors (${_pendingContributors.length})'),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+      body: TabBarView(
+        controller: _tabController,
+        children: [
+          // ── Tab 0: Materials ──
+          _isLoadingMaterials
+              ? const Center(
+                  child: CircularProgressIndicator(color: AppTheme.primaryColor))
+              : RefreshIndicator(
+                  color: AppTheme.primaryColor,
+                  onRefresh: _loadMaterials,
+                  child: _pendingMaterials.isEmpty
+                      ? _buildEmptyState(
+                          theme,
+                          isFacultyAdmin
+                              ? 'No pending materials assigned to you.'
+                              : 'No pending materials to review.',
+                        )
+                      : ListView.builder(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 20, vertical: 12),
+                          itemCount: _pendingMaterials.length,
+                          itemBuilder: (context, index) {
+                            final mat = _pendingMaterials[index];
+                            final isProcessing =
+                                _processingIds.contains(mat.id);
+                            return Container(
+                              margin: const EdgeInsets.only(bottom: 14),
+                              child: _PendingMaterialCard(
+                                mat: mat,
+                                theme: theme,
+                                isProcessing: isProcessing,
+                                onApprove: () => _approveMaterial(mat),
+                                onReject: () => _rejectMaterial(mat),
+                              ),
+                            );
+                          },
+                        ),
+                ),
+
+          // ── Tab 1: Contributors ──
+          _isLoadingContributors
+              ? const Center(
+                  child: CircularProgressIndicator(color: AppTheme.primaryColor))
+              : RefreshIndicator(
+                  color: AppTheme.primaryColor,
+                  onRefresh: _loadContributors,
+                  child: _pendingContributors.isEmpty
+                      ? _buildEmptyState(
+                          theme,
+                          isFacultyAdmin
+                              ? 'No pending contributor registrations for your department.'
+                              : 'No pending contributor registrations.',
+                        )
+                      : ListView.builder(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 20, vertical: 12),
+                          itemCount: _pendingContributors.length,
+                          itemBuilder: (context, index) {
+                            final user = _pendingContributors[index];
+                            final isProcessing =
+                                _processingIds.contains(user.uid);
+                            return Container(
+                              margin: const EdgeInsets.only(bottom: 14),
+                              child: _PendingContributorCard(
+                                user: user,
+                                theme: theme,
+                                isProcessing: isProcessing,
+                                onApprove: () => _approveContributor(user),
+                                onReject: () => _rejectContributor(user),
+                              ),
+                            );
+                          },
+                        ),
+                ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyState(ThemeData theme, String message) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.task_alt_rounded,
+              size: 60, color: Color(0xFF10B981)),
+          const SizedBox(height: 14),
+          Text('All caught up!',
+              style: theme.textTheme.titleMedium
+                  ?.copyWith(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 6),
+          Text(
+            message,
+            style: theme.textTheme.bodyMedium,
+            textAlign: TextAlign.center,
           ),
         ],
       ),
-      body: _isLoading
-          ? const Center(
-              child: CircularProgressIndicator(color: AppTheme.primaryColor))
-          : RefreshIndicator(
-              color: AppTheme.primaryColor,
-              onRefresh: _loadPending,
-              child: _pending.isEmpty
-                  ? Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(Icons.task_alt_rounded,
-                              size: 60, color: Color(0xFF10B981)),
-                          const SizedBox(height: 14),
-                          Text('All caught up!',
-                              style: theme.textTheme.titleMedium
-                                  ?.copyWith(fontWeight: FontWeight.bold)),
-                          const SizedBox(height: 6),
-                          Text(
-                            isFacultyAdmin
-                                ? 'No pending materials assigned to you.'
-                                : 'No pending materials to review.',
-                            style: theme.textTheme.bodyMedium,
-                            textAlign: TextAlign.center,
-                          ),
-                        ],
-                      ),
-                    )
-                  : ListView.builder(
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 20, vertical: 12),
-                      itemCount: _pending.length,
-                      itemBuilder: (context, index) {
-                        final mat = _pending[index];
-                        final isProcessing =
-                            _processingIds.contains(mat.id);
-                        return Container(
-                          margin: const EdgeInsets.only(bottom: 14),
-                          child: _PendingCard(
-                            mat: mat,
-                            theme: theme,
-                            isProcessing: isProcessing,
-                            onApprove: () => _approve(mat),
-                            onReject: () => _reject(mat),
-                          ),
-                        );
-                      },
-                    ),
-            ),
     );
   }
 }
 
 // ─── Pending Material Card ─────────────────────────────────────────────────
 
-class _PendingCard extends StatelessWidget {
+class _PendingMaterialCard extends StatelessWidget {
   final MaterialModel mat;
   final ThemeData theme;
   final bool isProcessing;
   final VoidCallback onApprove;
   final VoidCallback onReject;
 
-  const _PendingCard({
+  const _PendingMaterialCard({
     required this.mat,
     required this.theme,
     required this.isProcessing,
@@ -306,7 +428,6 @@ class _PendingCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Header ─────────────────────────────────────────────────
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -338,8 +459,6 @@ class _PendingCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
-
-          // ── Contributor & type meta ─────────────────────────────────
           Row(
             children: [
               CircleAvatar(
@@ -364,8 +483,6 @@ class _PendingCard extends StatelessWidget {
               ),
             ],
           ),
-
-          // ── Department tag ──────────────────────────────────────────
           if (mat.department.isNotEmpty) ...[
             const SizedBox(height: 8),
             Row(
@@ -379,10 +496,130 @@ class _PendingCard extends StatelessWidget {
               ],
             ),
           ],
-
           const SizedBox(height: 14),
+          if (isProcessing)
+            const Center(
+              child: SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: AppTheme.primaryColor),
+              ),
+            )
+          else
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFFEF4444),
+                      side: const BorderSide(color: Color(0xFFEF4444)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                    ),
+                    icon: const Icon(Icons.close_rounded, size: 16),
+                    label: const Text('Reject',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 13)),
+                    onPressed: onReject,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF10B981),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                    ),
+                    icon: const Icon(Icons.check_rounded, size: 16),
+                    label: const Text('Approve',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 13)),
+                    onPressed: onApprove,
+                  ),
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+}
 
-          // ── Action buttons ──────────────────────────────────────────
+// ─── Pending Contributor Card ──────────────────────────────────────────────
+
+class _PendingContributorCard extends StatelessWidget {
+  final UserModel user;
+  final ThemeData theme;
+  final bool isProcessing;
+  final VoidCallback onApprove;
+  final VoidCallback onReject;
+
+  const _PendingContributorCard({
+    required this.user,
+    required this.theme,
+    required this.isProcessing,
+    required this.onApprove,
+    required this.onReject,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final initials = user.name.isNotEmpty
+        ? user.name.trim().split(' ').map((w) => w[0]).take(2).join().toUpperCase()
+        : '?';
+
+    return GlassCard(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 20,
+                backgroundColor: AppTheme.primaryColor.withOpacity(0.15),
+                child: Text(
+                  initials,
+                  style: const TextStyle(
+                      color: AppTheme.primaryColor,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(user.name,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold, fontSize: 14)),
+                    const SizedBox(height: 2),
+                    Text(user.email,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                            fontSize: 11, color: theme.disabledColor)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Icon(Icons.school_outlined, size: 14, color: theme.disabledColor),
+              const SizedBox(width: 6),
+              Text(
+                user.department.isNotEmpty ? user.department : 'Unspecified Department',
+                style: theme.textTheme.bodyMedium?.copyWith(fontSize: 12),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
           if (isProcessing)
             const Center(
               child: SizedBox(

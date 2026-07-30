@@ -19,7 +19,14 @@ class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  // UI role keys — 'admin_ui' maps to backend 'faculty_admin'
+  // (Super Admin is hidden from login UI)
   String _selectedRole = 'student';
+  static const Map<String, String> _uiToBackendRole = {
+    'student': 'student',
+    'contributor': 'contributor',
+    'admin_ui': 'faculty_admin',
+  };
 
   @override
   void dispose() {
@@ -31,10 +38,12 @@ class _LoginScreenState extends State<LoginScreen> {
   void _handleLogin() async {
     if (_formKey.currentState!.validate()) {
       final authService = Provider.of<AuthService>(context, listen: false);
+      // Map UI role to backend role value
+      final backendRole = _uiToBackendRole[_selectedRole] ?? _selectedRole;
       final error = await authService.login(
         _emailController.text.trim(),
         _passwordController.text,
-        _selectedRole,
+        backendRole,
       );
 
       if (error != null) {
@@ -181,7 +190,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                           const SizedBox(height: 8),
 
-                          // Row 1: Student · Contributor · Admin (legacy)
+                          // Student · Contributor · Admin (Super Admin hidden)
                           Row(
                             children: [
                               _buildRoleChip('student', 'Student',
@@ -190,20 +199,8 @@ class _LoginScreenState extends State<LoginScreen> {
                               _buildRoleChip('contributor', 'Contributor',
                                   Icons.upload_outlined),
                               const SizedBox(width: 8),
-                              _buildRoleChip('admin', 'Admin',
+                              _buildRoleChip('admin_ui', 'Admin',
                                   Icons.manage_accounts_outlined),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-
-                          // Row 2: Faculty Admin · Super Admin
-                          Row(
-                            children: [
-                              _buildRoleChip('faculty_admin', 'Faculty Admin',
-                                  Icons.admin_panel_settings_outlined),
-                              const SizedBox(width: 8),
-                              _buildRoleChip('super_admin', 'Super Admin',
-                                  Icons.shield_outlined),
                             ],
                           ),
 

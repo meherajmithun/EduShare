@@ -1,19 +1,21 @@
 /**
  * services/notificationService.js — Notification creation helpers
  *
- * Called from materialController (on upload) and adminController
- * (on approve/reject). Never throws — notification failures must
- * never break the primary operation.
+ * Called from materialController (on upload), adminController (on approve/reject),
+ * authController (on Admin registration), and superAdminController (on Admin
+ * approve/reject). Never throws — notification failures must never break the
+ * primary operation.
  */
 
 const Notification = require('../models/Notification');
+const User = require('../models/User');
 
 /**
- * Notify the assigned Faculty Admin that a new material was uploaded to their department.
+ * Notify the assigned Admin that a new material was uploaded to their department.
  */
 const notifyFacultyAdminOnUpload = async ({ material, uploader }) => {
   try {
-    if (!material.assignedAdmin) return; // No Faculty Admin assigned — skip
+    if (!material.assignedAdmin) return; // No Admin assigned — skip
 
     await Notification.create({
       recipient: material.assignedAdmin,
@@ -26,7 +28,7 @@ const notifyFacultyAdminOnUpload = async ({ material, uploader }) => {
       materialTitle: material.title,
     });
   } catch (err) {
-    console.error('[NotificationService] Failed to notify Faculty Admin on upload:', err.message);
+    console.error('[NotificationService] Failed to notify Admin on upload:', err.message);
   }
 };
 
@@ -74,8 +76,136 @@ const notifyContributorOnRejection = async ({ material, admin, reason }) => {
   }
 };
 
+/**
+ * Notify the Super Admin that a new Admin registration is pending their approval.
+ * Finds the super_admin user automatically.
+ */
+const notifySuperAdminOnNewAdmin = async ({ newAdmin }) => {
+  try {
+    const superAdmin = await User.findOne({ role: 'super_admin', isActive: true });
+    if (!superAdmin) return; // No Super Admin found — skip
+
+    await Notification.create({
+      recipient: superAdmin._id,
+      sender: newAdmin._id,
+      senderName: newAdmin.name,
+      title: 'New Admin Registration',
+      message: `${newAdmin.name} (${newAdmin.email}) has submitted an Admin registration request for the ${newAdmin.department || 'N/A'} department. Review and approve or reject.`,
+      type: 'admin_registered',
+    });
+  } catch (err) {
+    console.error('[NotificationService] Failed to notify Super Admin on new Admin registration:', err.message);
+  }
+};
+
+/**
+ * Notify the Admin that their account has been approved by the Super Admin.
+ */
+const notifyAdminOnApproval = async ({ admin, superAdmin }) => {
+  try {
+    await Notification.create({
+      recipient: admin._id,
+      sender: superAdmin._id,
+      senderName: superAdmin.name,
+      title: 'Account Approved ✓',
+      message: `Your Admin account has been approved by ${superAdmin.name}. You can now log in to EduShare.`,
+      type: 'admin_approved',
+    });
+  } catch (err) {
+    console.error('[NotificationService] Failed to notify Admin on approval:', err.message);
+  }
+};
+
+/**
+ * Notify the Admin that their account has been rejected by the Super Admin.
+ */
+const notifyAdminOnRejection = async ({ admin, superAdmin, reason }) => {
+  try {
+    const reasonText = reason && reason.trim()
+      ? reason.trim()
+      : 'No reason provided.';
+
+    await Notification.create({
+      recipient: admin._id,
+      sender: superAdmin._id,
+      senderName: superAdmin.name,
+      title: 'Account Registration Rejected',
+      message: `Your Admin registration was rejected by ${superAdmin.name}. Reason: ${reasonText}`,
+      type: 'admin_rejected',
+    });
+  } catch (err) {
+    console.error('[NotificationService] Failed to notify Admin on rejection:', err.message);
+  }
+};
+
+/**
+ * Notify the Faculty Admin that a new contributor has registered for their department.
+ * @param {Object} contributor — newly registered User document
+ * @param {Object} facultyAdmin — the active Faculty Admin for the department
+ */
+const notifyFacultyAdminOnContributorRegistration = async ({ contributor, facultyAdmin }) => {
+  try {
+    if (!facultyAdmin) return; // No Faculty Admin assigned — skip (Super Admin will review)
+
+    await Notification.create({
+      recipient: facultyAdmin._id,
+      sender: contributor._id,
+      senderName: contributor.name,
+      title: 'New Contributor Registration',
+      message: `${contributor.name} (${contributor.email}) has registered as a Contributor in the ${contributor.department || 'your'} department and is awaiting your approval.`,
+      type: 'contributor_registered',
+    });
+  } catch (err) {
+    console.error('[NotificationService] Failed to notify Faculty Admin on contributor registration:', err.message);
+  }
+};
+
+/**
+ * Notify the contributor that their account has been approved by the Faculty Admin.
+ */
+const notifyContributorOnAccountApproval = async ({ contributor, admin }) => {
+  try {
+    await Notification.create({
+      recipient: contributor._id,
+      sender: admin._id,
+      senderName: admin.name,
+      title: 'Account Approved ✓',
+      message: `Your contributor account has been approved by ${admin.name}. You can now log in to EduShare and upload materials.`,
+      type: 'contributor_approved',
+    });
+  } catch (err) {
+    console.error('[NotificationService] Failed to notify contributor on approval:', err.message);
+  }
+};
+
+/**
+ * Notify the contributor that their account has been rejected, with the reason.
+ */
+const notifyContributorOnAccountRejection = async ({ contributor, admin, reason }) => {
+  try {
+    const reasonText = reason && reason.trim() ? reason.trim() : 'No reason provided.';
+
+    await Notification.create({
+      recipient: contributor._id,
+      sender: admin._id,
+      senderName: admin.name,
+      title: 'Contributor Registration Rejected',
+      message: `Your contributor registration was rejected by ${admin.name}. Reason: ${reasonText}`,
+      type: 'contributor_rejected',
+    });
+  } catch (err) {
+    console.error('[NotificationService] Failed to notify contributor on rejection:', err.message);
+  }
+};
+
 module.exports = {
   notifyFacultyAdminOnUpload,
   notifyContributorOnApproval,
   notifyContributorOnRejection,
+  notifySuperAdminOnNewAdmin,
+  notifyAdminOnApproval,
+  notifyAdminOnRejection,
+  notifyFacultyAdminOnContributorRegistration,
+  notifyContributorOnAccountApproval,
+  notifyContributorOnAccountRejection,
 };

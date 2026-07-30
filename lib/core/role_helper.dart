@@ -14,12 +14,13 @@ extension RoleHelper on UserModel {
   bool get isActive => status == 'active';
   bool get isPending => status == 'pending';
   bool get isDisabled => status == 'disabled';
+  bool get isRejected => status == 'rejected';
 
   // ─── Permission helpers ────────────────────────────────────────────
 
-  /// True for roles that can upload materials (contributor, admin-class roles)
+  /// True for roles that can upload materials (active contributor, admin-class roles)
   bool get canUpload =>
-      isContributor || isAdmin || isFacultyAdmin || isSuperAdmin;
+      (isContributor && isActive) || isAdmin || isFacultyAdmin || isSuperAdmin;
 
   /// True for roles that can approve / reject materials
   bool get canApprove => isAdmin || isFacultyAdmin || isSuperAdmin;
@@ -38,9 +39,9 @@ extension RoleHelper on UserModel {
       case 'contributor':
         return 'Contributor';
       case 'admin':
-        return 'Admin';
+        return 'Admin (Legacy)';
       case 'faculty_admin':
-        return 'Faculty Admin';
+        return 'Admin';
       case 'super_admin':
         return 'Super Admin';
       default:

@@ -74,7 +74,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
     super.dispose();
   }
 
-  bool get _isFacultyAdmin => _selectedRole == 'faculty_admin';
+  // 'Admin' in UI = 'faculty_admin' backend role (requires Super Admin approval)
+  bool get _isAdminRole => _selectedRole == 'faculty_admin';
+  // Backward compat alias used in validators/conditionals below
+  bool get _isFacultyAdmin => _isAdminRole;
 
   void _handleRegister() async {
     if (!_formKey.currentState!.validate()) return;
@@ -121,7 +124,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         }
       }
     } else {
-      // Standard registration — logs in immediately
+      // Standard registration (student / legacy admin)
       final error = await authService.register(
         name: _nameController.text.trim(),
         email: _emailController.text.trim(),
@@ -132,7 +135,23 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
       if (error != null) {
         if (mounted) _showError(error);
+      } else if (authService.isLastRegistrationPending) {
+        // Contributor path — account needs Faculty Admin approval
+        if (mounted) {
+          Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(
+              builder: (_) => PendingApprovalScreen(
+                name: _nameController.text.trim(),
+                email: _emailController.text.trim(),
+                department: _selectedDepartment,
+                isPendingContributor: true,
+              ),
+            ),
+            (route) => false,
+          );
+        }
       } else {
+        // Student / legacy admin — logged in immediately
         if (mounted) {
           Navigator.of(context).pushAndRemoveUntil(
             MaterialPageRoute(builder: (_) => const MainShell()),
@@ -357,7 +376,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                   _buildRoleOption('contributor', 'Contributor',
                                       Icons.upload_outlined),
                                   const SizedBox(width: 8),
-                                  _buildRoleOption('faculty_admin', 'Faculty Admin',
+                                  _buildRoleOption('faculty_admin', 'Admin',
                                       Icons.admin_panel_settings_outlined),
                                 ],
                               ),
@@ -365,7 +384,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           ),
                           const SizedBox(height: 20),
 
-                          // ─── Faculty Admin extra fields ─────────────────
+                          // ─── Admin extra fields ─────────────────
                           if (_isFacultyAdmin) ...[
                             CustomTextField(
                               label: 'FACULTY ID',
@@ -410,7 +429,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                   const SizedBox(width: 8),
                                   Expanded(
                                     child: Text(
-                                      'Your application will be reviewed by the Super Admin before you can log in.',
+                                      'Your admin application will be reviewed by the Super Admin before you can log in.',
                                       style: theme.textTheme.bodyMedium?.copyWith(
                                         fontSize: 12,
                                         color: const Color(0xFFF59E0B),

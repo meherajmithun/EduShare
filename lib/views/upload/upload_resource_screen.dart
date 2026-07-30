@@ -11,7 +11,8 @@ import 'package:edushare/widgets/custom_button.dart';
 import 'package:edushare/widgets/custom_textfield.dart';
 
 class UploadResourceScreen extends StatefulWidget {
-  const UploadResourceScreen({Key? key}) : super(key: key);
+  final VoidCallback? onUploadSuccess;
+  const UploadResourceScreen({Key? key, this.onUploadSuccess}) : super(key: key);
 
   @override
   State<UploadResourceScreen> createState() => _UploadResourceScreenState();
@@ -89,6 +90,7 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
       FilePickerResult? result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png'],
+        withData: true, // Ensures bytes are always populated (cross-platform safe)
       );
 
       if (result != null) {
@@ -97,23 +99,46 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
         });
       }
     } catch (e) {
-      // Error picking file
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not open file picker: ${e.toString()}'),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        );
+      }
     }
   }
 
   void _handleUpload() async {
     if (!_formKey.currentState!.validate()) return;
 
-    if (_selectedType != 'video' && _selectedFile == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Please select a PDF or Image file to upload'),
-          backgroundColor: Colors.redAccent,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        ),
-      );
-      return;
+    // For file-based types, validate that a file was selected AND bytes are available
+    if (_selectedType != 'video') {
+      if (_selectedFile == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Please select a PDF or document file to upload'),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        );
+        return;
+      }
+      if (_selectedFile!.bytes == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Could not read file data. Please try selecting the file again.'),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        );
+        return;
+      }
     }
 
     setState(() {
@@ -124,13 +149,12 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
     final currentUser = authService.currentUser;
 
     try {
-      // Build the MaterialModel — the server assigns the real id
       final newMaterial = MaterialModel(
-        id: '', // Placeholder; server generates the MongoDB _id
+        id: '',
         title: _titleController.text.trim(),
         description: _descriptionController.text.trim(),
         type: _selectedType,
-        fileUrl: null, // Set by Cloudinary on the server
+        fileUrl: null,
         videoLink: _selectedType == 'video' ? _linkController.text.trim() : null,
         courseId: _selectedCourse?.id ?? '',
         departmentId: _selectedCourse?.departmentId ?? '',
@@ -140,13 +164,11 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
         createdAt: DateTime.now(),
       );
 
-      // Pass the file path — FirestoreService sends it as multipart to the server,
-      // which streams it to Cloudinary and stores the resulting URL in MongoDB.
+      // Upload using file bytes (cross-platform: works even when path is null)
       await _firestoreService.uploadMaterial(
         newMaterial,
-        filePath: (_selectedType != 'video' && _selectedFile != null)
-            ? _selectedFile!.path
-            : null,
+        fileBytes: _selectedType != 'video' ? _selectedFile!.bytes : null,
+        fileName: _selectedType != 'video' ? _selectedFile!.name : null,
       );
 
       if (mounted) {
@@ -163,6 +185,8 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
           ),
         );
 
+        // Notify parent to refresh the uploads list, then close
+        widget.onUploadSuccess?.call();
         Navigator.of(context).pop();
       }
     } catch (e) {
@@ -172,7 +196,7 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error: ${e.toString()}'),
+            content: Text('Upload failed: ${e.toString()}'),
             backgroundColor: Colors.redAccent,
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),

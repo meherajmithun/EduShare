@@ -2,18 +2,21 @@ import 'package:flutter/material.dart';
 import 'package:edushare/core/theme.dart';
 import 'package:edushare/views/auth/login_screen.dart';
 
-/// Shown after a successful Faculty Admin registration submission.
-/// The account is pending Super Admin approval — no token is issued yet.
+/// Shown after a successful registration submission where approval is needed.
+/// [isPendingContributor] = true  → Faculty Admin review (contributor)
+/// [isPendingContributor] = false → Super Admin review (Admin/faculty_admin)
 class PendingApprovalScreen extends StatelessWidget {
   final String name;
   final String email;
   final String department;
+  final bool isPendingContributor;
 
   const PendingApprovalScreen({
     Key? key,
     required this.name,
     required this.email,
     required this.department,
+    this.isPendingContributor = false,
   }) : super(key: key);
 
   @override
@@ -75,7 +78,9 @@ class PendingApprovalScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    'Your Faculty Admin application is awaiting Super Admin approval.',
+                    isPendingContributor
+                        ? 'Your contributor account is awaiting Faculty Admin approval.'
+                        : 'Your Admin application is awaiting Super Admin approval.',
                     textAlign: TextAlign.center,
                     style: theme.textTheme.bodyMedium?.copyWith(
                       fontSize: 14,
@@ -148,12 +153,19 @@ class PendingApprovalScreen extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(height: 12),
-                        _stepRow(theme, '1', 'Super Admin reviews your application'),
-                        const SizedBox(height: 8),
-                        _stepRow(theme, '2', 'You\'ll be notified upon approval'),
-                        const SizedBox(height: 8),
-                        _stepRow(theme, '3',
-                            'Once approved, log in as Faculty Admin'),
+                        if (isPendingContributor) ...[
+                          _stepRow(theme, '1', 'The Faculty Admin for your department reviews your registration'),
+                          const SizedBox(height: 8),
+                          _stepRow(theme, '2', 'You\'ll receive an in-app notification upon approval or rejection'),
+                          const SizedBox(height: 8),
+                          _stepRow(theme, '3', 'Once approved, log in as Contributor and start uploading materials'),
+                        ] else ...[
+                          _stepRow(theme, '1', 'Super Admin reviews your application'),
+                          const SizedBox(height: 8),
+                          _stepRow(theme, '2', 'You\'ll be notified upon approval'),
+                          const SizedBox(height: 8),
+                          _stepRow(theme, '3', 'Once approved, log in as Admin'),
+                        ],
                       ],
                     ),
                   ),

@@ -5,12 +5,13 @@
  *   student       — default, read-only access
  *   contributor   — can upload materials
  *   admin         — legacy admin (kept for backward compatibility)
- *   faculty_admin — department-scoped admin, requires Super Admin approval
- *   super_admin   — global admin, manages Faculty Admins and all departments
+ *   faculty_admin — department-scoped Admin (shown as "Admin" in UI), requires Super Admin approval
+ *   super_admin   — global admin, manages Admins and all departments (hidden from UI)
  *
- * Status (used for Faculty Admin approval workflow):
- *   active  — fully active account (default for student/contributor/admin/super_admin)
- *   pending — Faculty Admin registration awaiting Super Admin approval
+ * Status (used for Admin approval workflow):
+ *   active   — fully active account (default for student/contributor/admin/super_admin)
+ *   pending  — Admin registration awaiting Super Admin approval
+ *   rejected — Admin registration rejected by Super Admin
  *   disabled — account suspended by Super Admin
  */
 
@@ -49,12 +50,12 @@ const userSchema = new mongoose.Schema(
       default: 'student',
     },
 
-    // ─── Account status (Faculty Admin approval workflow) ──────────────────
+    // ─── Account status (Admin approval workflow) ──────────────────────────
     status: {
       type: String,
       enum: {
-        values: ['active', 'pending', 'disabled'],
-        message: 'Status must be active, pending, or disabled',
+        values: ['active', 'pending', 'rejected', 'disabled'],
+        message: 'Status must be active, pending, rejected, or disabled',
       },
       default: 'active',
     },
@@ -88,6 +89,23 @@ const userSchema = new mongoose.Schema(
       type: String,
       trim: true,
       default: '',
+    },
+
+    // ─── Admin approval tracking ───────────────────────────────────────────
+    // Set when Super Admin approves or rejects a pending Admin
+    verifiedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    verifiedAt: {
+      type: Date,
+      default: null,
+    },
+    rejectionReason: {
+      type: String,
+      trim: true,
+      default: null,
     },
 
     // ─── Soft-delete flag ──────────────────────────────────────────────────

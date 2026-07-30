@@ -36,6 +36,10 @@ const protect = async (req, res, next) => {
       throw createError('Your account has been deactivated. Contact support.', 401);
     }
 
+    if (user.status !== 'active') {
+      throw createError(`Your account is ${user.status}. Access denied.`, 403);
+    }
+
     req.user = user; // Available to all subsequent handlers
     next();
   } catch (err) {
