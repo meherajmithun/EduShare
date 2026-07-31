@@ -23,6 +23,13 @@ const getUsers = async (req, res) => {
     filter.department = req.user.department;
   }
 
+  // Hide super_admin accounts from non-super_admin users
+  if (req.user.role !== 'super_admin') {
+    filter.role = filter.role && filter.role !== 'super_admin'
+      ? filter.role
+      : { $ne: 'super_admin' };
+  }
+
   const users = await User.find(filter).sort({ createdAt: -1 }).select('-password');
   res.json(success(users, 'Users fetched successfully.'));
 };

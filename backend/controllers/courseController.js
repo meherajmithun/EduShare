@@ -15,9 +15,9 @@ const Course = require('../models/Course');
 const Department = require('../models/Department');
 const { success, createError } = require('../utils/apiResponse');
 
-// ─── Helper: assert faculty_admin owns this course's department ────────
+// ─── Helper: assert faculty_admin / admin owns this course's department ─
 const assertDeptOwnership = (user, course) => {
-  if (user.role === 'faculty_admin') {
+  if (user.role === 'faculty_admin' || user.role === 'admin') {
     const courseDeptId = course.departmentId?.toString();
     const userDeptId = user.departmentId?.toString();
     if (!userDeptId || courseDeptId !== userDeptId) {
@@ -59,8 +59,8 @@ const createCourse = async (req, res) => {
     throw createError('name and code are required.', 400);
   }
 
-  // faculty_admin must use their own department
-  if (req.user.role === 'faculty_admin') {
+  // faculty_admin and admin must use their own department
+  if (req.user.role === 'faculty_admin' || req.user.role === 'admin') {
     if (!req.user.departmentId) {
       throw createError('Your account has no department assigned. Contact a Super Admin.', 403);
     }

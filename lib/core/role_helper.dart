@@ -39,7 +39,6 @@ extension RoleHelper on UserModel {
       case 'contributor':
         return 'Contributor';
       case 'admin':
-        return 'Admin (Legacy)';
       case 'faculty_admin':
         return 'Admin';
       case 'super_admin':

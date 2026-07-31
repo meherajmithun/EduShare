@@ -85,6 +85,11 @@ const userSchema = new mongoose.Schema(
       trim: true,
       default: '',
     },
+    bio: {
+      type: String,
+      trim: true,
+      default: '',
+    },
     profilePhotoUrl: {
       type: String,
       trim: true,

@@ -12,6 +12,7 @@ class UserModel {
   final String? departmentId;
   final String? facultyId;
   final String? designation;
+  final String? bio;
   final String? profilePhotoUrl;
   final DateTime createdAt;
 
@@ -25,6 +26,7 @@ class UserModel {
     this.departmentId,
     this.facultyId,
     this.designation,
+    this.bio,
     this.profilePhotoUrl,
     required this.createdAt,
   });
@@ -39,6 +41,7 @@ class UserModel {
     String? departmentId,
     String? facultyId,
     String? designation,
+    String? bio,
     String? profilePhotoUrl,
     DateTime? createdAt,
   }) {
@@ -52,6 +55,7 @@ class UserModel {
       departmentId: departmentId ?? this.departmentId,
       facultyId: facultyId ?? this.facultyId,
       designation: designation ?? this.designation,
+      bio: bio ?? this.bio,
       profilePhotoUrl: profilePhotoUrl ?? this.profilePhotoUrl,
       createdAt: createdAt ?? this.createdAt,
     );
@@ -70,6 +74,7 @@ class UserModel {
       departmentId: json['departmentId']?.toString(),
       facultyId: json['facultyId'] as String?,
       designation: json['designation'] as String?,
+      bio: json['bio'] as String?,
       profilePhotoUrl: json['profilePhotoUrl'] as String?,
       createdAt: json['createdAt'] != null
           ? DateTime.tryParse(json['createdAt'].toString()) ?? DateTime.now()
@@ -88,6 +93,7 @@ class UserModel {
       if (departmentId != null) 'departmentId': departmentId,
       if (facultyId != null) 'facultyId': facultyId,
       if (designation != null) 'designation': designation,
+      if (bio != null) 'bio': bio,
       if (profilePhotoUrl != null) 'profilePhotoUrl': profilePhotoUrl,
       'createdAt': createdAt.toIso8601String(),
     };

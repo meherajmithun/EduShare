@@ -28,8 +28,6 @@ class _UsersScreenState extends State<UsersScreen> {
     {'value': 'all', 'label': 'All'},
     {'value': 'student', 'label': 'Students'},
     {'value': 'contributor', 'label': 'Contributors'},
-    {'value': 'faculty_admin', 'label': 'Faculty Admins'},
-    {'value': 'super_admin', 'label': 'Super Admins'},
     {'value': 'admin', 'label': 'Admins'},
   ];
 
@@ -65,10 +63,24 @@ class _UsersScreenState extends State<UsersScreen> {
   }
 
   void _applyFilter() {
+    final currentUser =
+        Provider.of<AuthService>(context, listen: false).currentUser;
+    // Always hide super_admin user accounts from non-super_admin users
+    final visibleUsers = _users.where((u) {
+      if (u.role == 'super_admin' && !(currentUser?.isSuperAdmin ?? false)) {
+        return false;
+      }
+      return true;
+    }).toList();
+
     if (_filterRole == 'all') {
-      _filtered = List.from(_users);
+      _filtered = visibleUsers;
+    } else if (_filterRole == 'admin') {
+      _filtered = visibleUsers
+          .where((u) => u.role == 'admin' || u.role == 'faculty_admin')
+          .toList();
     } else {
-      _filtered = _users.where((u) => u.role == _filterRole).toList();
+      _filtered = visibleUsers.where((u) => u.role == _filterRole).toList();
     }
   }
 
@@ -261,8 +273,8 @@ class _UserCard extends StatelessWidget {
   Color _roleColor() {
     switch (user.role) {
       case 'super_admin': return const Color(0xFF8B5CF6);
-      case 'faculty_admin': return AppTheme.primaryColor;
-      case 'admin': return AppTheme.accentColor;
+      case 'faculty_admin':
+      case 'admin': return AppTheme.primaryColor;
       case 'contributor': return const Color(0xFF10B981);
       default: return Colors.grey;
     }

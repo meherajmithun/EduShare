@@ -5,6 +5,7 @@
 /// registerFacultyAdmin() does NOT log the user in — it submits the
 /// application and returns success/error without persisting a token.
 
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:edushare/models/user_model.dart';
 import 'package:edushare/core/services/api_client.dart';
@@ -212,6 +213,73 @@ class AuthService extends ChangeNotifier {
       _isLoading = false;
       notifyListeners();
       return 'An unexpected error occurred. Please try again.';
+    }
+  }
+
+  // ─── Update Profile ──────────────────────────────────────────────────
+  Future<String?> updateProfile({
+    String? name,
+    String? bio,
+    String? designation,
+    String? profilePhotoUrl,
+  }) async {
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      final data = await _api.put('/api/auth/profile', {
+        if (name != null) 'name': name.trim(),
+        if (bio != null) 'bio': bio.trim(),
+        if (designation != null) 'designation': designation.trim(),
+        if (profilePhotoUrl != null) 'profilePhotoUrl': profilePhotoUrl.trim(),
+      });
+
+      final updatedUser = UserModel.fromJson(data as Map<String, dynamic>);
+      await _session.saveUser(updatedUser);
+      _currentUser = updatedUser;
+      _isLoading = false;
+      notifyListeners();
+      return null;
+    } on AppException catch (e) {
+      _isLoading = false;
+      notifyListeners();
+      return e.message;
+    } catch (e) {
+      _isLoading = false;
+      notifyListeners();
+      return 'Failed to update profile. Please try again.';
+    }
+  }
+
+  // ─── Upload Profile Photo ──────────────────────────────────────────────
+  Future<String?> updateProfilePhotoBytes(Uint8List bytes, String fileName) async {
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      final data = await _api.postMultipartBytes(
+        '/api/auth/profile/photo',
+        bytes: bytes,
+        fileName: fileName,
+        fileField: 'photo',
+      );
+
+      final photoUrl = data['profilePhotoUrl'] as String?;
+      if (photoUrl != null && _currentUser != null) {
+        _currentUser = _currentUser!.copyWith(profilePhotoUrl: photoUrl);
+        await _session.saveUser(_currentUser!);
+      }
+      _isLoading = false;
+      notifyListeners();
+      return null;
+    } on AppException catch (e) {
+      _isLoading = false;
+      notifyListeners();
+      return e.message;
+    } catch (e) {
+      _isLoading = false;
+      notifyListeners();
+      return 'Failed to upload photo. Please try again.';
     }
   }
 

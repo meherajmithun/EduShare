@@ -6,6 +6,7 @@ import 'package:edushare/core/services/auth_service.dart';
 import 'package:edushare/models/user_model.dart';
 import 'package:edushare/views/auth/login_screen.dart';
 import 'package:edushare/views/settings/settings_screen.dart';
+import 'package:edushare/views/profile/edit_profile_screen.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({Key? key}) : super(key: key);
@@ -20,6 +21,7 @@ class ProfileScreen extends StatelessWidget {
     if (user == null) return const SizedBox.shrink();
 
     final roleColor = _getRoleColor(user.role);
+    final photoUrl = user.profilePhotoUrl;
 
     return Scaffold(
       appBar: AppBar(
@@ -54,17 +56,16 @@ class ProfileScreen extends StatelessWidget {
                         ),
                       ],
                     ),
-                    child: Center(
-                      child: Text(
-                        user.name.isNotEmpty
-                            ? user.name[0].toUpperCase()
-                            : '?',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 38,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
+                    child: ClipOval(
+                      child: (photoUrl != null && photoUrl.isNotEmpty)
+                          ? Image.network(
+                              photoUrl,
+                              fit: BoxFit.cover,
+                              width: 90,
+                              height: 90,
+                              errorBuilder: (_, __, ___) => _buildInitials(user.name),
+                            )
+                          : _buildInitials(user.name),
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -84,7 +85,7 @@ class ProfileScreen extends StatelessWidget {
                       border: Border.all(color: roleColor, width: 1.5),
                     ),
                     child: Text(
-                      user.role.toUpperCase(),
+                      user.roleLabel.toUpperCase(),
                       style: TextStyle(
                         color: roleColor,
                         fontSize: 12,
@@ -97,6 +98,18 @@ class ProfileScreen extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 32),
+
+            // Bio card if available
+            if (user.bio != null && user.bio!.trim().isNotEmpty) ...[
+              _buildInfoCard(
+                context,
+                icon: Icons.info_outline_rounded,
+                label: 'About Me',
+                value: user.bio!,
+                isDark: isDark,
+              ),
+              const SizedBox(height: 12),
+            ],
 
             // Info cards
             _buildInfoCard(
@@ -130,7 +143,7 @@ class ProfileScreen extends StatelessWidget {
                 context,
                 icon: Icons.upload_file_outlined,
                 label: 'Permissions',
-                value: user.isAdmin
+                value: user.isAnyAdmin
                     ? 'Upload · Approve · Delete'
                     : 'Upload Materials',
                 isDark: isDark,
@@ -139,6 +152,33 @@ class ProfileScreen extends StatelessWidget {
             ],
 
             const SizedBox(height: 24),
+
+            // Edit Profile button
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  backgroundColor: AppTheme.primaryColor,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14)),
+                ),
+                icon: const Icon(Icons.edit_outlined),
+                label: const Text(
+                  'Edit Profile',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                ),
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const EditProfileScreen(),
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 12),
 
             // Settings button
             SizedBox(
@@ -322,5 +362,18 @@ class ProfileScreen extends StatelessWidget {
       'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
     ];
     return '${months[dt.month - 1]} ${dt.day}, ${dt.year}';
+  }
+
+  Widget _buildInitials(String name) {
+    return Center(
+      child: Text(
+        name.isNotEmpty ? name[0].toUpperCase() : '?',
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 38,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
   }
 }

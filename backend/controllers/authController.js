@@ -275,9 +275,50 @@ const login = async (req, res) => {
   res.json(success({ token, user: userJSON }, 'Logged in successfully.'));
 };
 
+const { uploadBuffer } = require('../services/cloudinaryService');
+
 // ─── GET /api/auth/profile ────────────────────────────────────────────
 const getProfile = async (req, res) => {
   res.json(success(req.user, 'Profile fetched successfully.'));
 };
 
-module.exports = { register, registerFacultyAdmin, login, getProfile };
+// ─── PUT /api/auth/profile ────────────────────────────────────────────
+const updateProfile = async (req, res) => {
+  const { name, bio, designation, profilePhotoUrl } = req.body;
+  const user = await User.findById(req.user._id);
+  if (!user) throw createError('User not found.', 404);
+
+  if (name !== undefined && name.trim().length > 0) user.name = name.trim();
+  if (bio !== undefined) user.bio = bio.trim();
+  if (designation !== undefined) user.designation = designation.trim();
+  if (profilePhotoUrl !== undefined) user.profilePhotoUrl = profilePhotoUrl.trim();
+
+  await user.save();
+  const updatedUser = await User.findById(user._id).select('-password');
+  res.json(success(updatedUser, 'Profile updated successfully.'));
+};
+
+// ─── POST /api/auth/profile/photo ─────────────────────────────────────
+const uploadProfilePhoto = async (req, res) => {
+  if (!req.file || !req.file.buffer) {
+    throw createError('No photo file provided.', 400);
+  }
+
+  const result = await uploadBuffer(req.file.buffer, 'edushare/profiles');
+  const photoUrl = result.url;
+
+  if (req.user) {
+    await User.findByIdAndUpdate(req.user._id, { profilePhotoUrl: photoUrl });
+  }
+
+  res.json(success({ profilePhotoUrl: photoUrl }, 'Profile photo uploaded successfully.'));
+};
+
+module.exports = {
+  register,
+  registerFacultyAdmin,
+  login,
+  getProfile,
+  updateProfile,
+  uploadProfilePhoto,
+};
