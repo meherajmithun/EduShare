@@ -14,6 +14,7 @@ import 'package:edushare/views/admin/approvals_screen.dart';
 import 'package:edushare/views/admin/all_materials_screen.dart';
 import 'package:edushare/views/admin/users_screen.dart';
 import 'package:edushare/views/admin/faculty_admins_screen.dart';
+import 'package:edushare/views/admin/manage_courses_screen.dart';
 
 /// Role-aware navigation shell.
 /// Dynamically builds bottom navigation tabs based on the logged-in user's role:
@@ -141,6 +142,12 @@ class _MainShellState extends State<MainShell> {
             icon: Icons.dashboard_outlined,
             selectedIcon: Icons.dashboard_rounded,
             screen: AdminDashboardScreen(),
+          ),
+          _TabItem(
+            label: 'Courses',
+            icon: Icons.menu_book_outlined,
+            selectedIcon: Icons.menu_book_rounded,
+            screen: ManageCoursesScreen(),
           ),
           _TabItem(
             label: 'Approvals',

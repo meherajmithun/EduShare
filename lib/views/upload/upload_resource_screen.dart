@@ -53,22 +53,24 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
     final user = authService.currentUser;
 
     try {
-      // Fetch all departments, then match on the user's department name
-      // to get the real MongoDB ObjectId for the courses query.
-      final departments = await _firestoreService.getDepartments();
-      final userDept = user?.department ?? '';
+      String deptId = user?.departmentId ?? '';
 
-      DepartmentModel? matchedDept;
-      for (final dept in departments) {
-        if (dept.code == userDept ||
-            dept.name == userDept ||
-            userDept.contains(dept.code)) {
-          matchedDept = dept;
-          break;
+      if (deptId.isEmpty) {
+        // Fall back to matching department name to get department ID
+        final departments = await _firestoreService.getDepartments();
+        final userDept = user?.department ?? '';
+
+        DepartmentModel? matchedDept;
+        for (final dept in departments) {
+          if (dept.code == userDept ||
+              dept.name == userDept ||
+              userDept.contains(dept.code)) {
+            matchedDept = dept;
+            break;
+          }
         }
+        deptId = matchedDept?.id ?? (departments.isNotEmpty ? departments.first.id : '');
       }
-      // Fall back to first department if no match
-      final deptId = matchedDept?.id ?? (departments.isNotEmpty ? departments.first.id : '');
 
       final courses = await _firestoreService.getCourses(deptId);
       setState(() {

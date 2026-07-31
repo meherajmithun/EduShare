@@ -8,9 +8,17 @@
  */
 
 const mongoose = require('mongoose');
+const dns = require('dns');
 
 const connectDB = async () => {
   try {
+    // Set reliable public DNS servers to resolve MongoDB SRV records (fixes querySrv ECONNREFUSED on ISP DNS)
+    try {
+      dns.setServers(['8.8.8.8', '8.8.4.4']);
+    } catch (_) {
+      // Fall back silently if setServers fails
+    }
+
     const conn = await mongoose.connect(process.env.MONGO_URI, {
       maxPoolSize: 10,
       serverSelectionTimeoutMS: 15000, // wait up to 15 s for Atlas on cold start

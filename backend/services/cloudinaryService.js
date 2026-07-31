@@ -10,6 +10,7 @@
  *  - deleteFile()  — remove a file from Cloudinary by public_id
  */
 
+const path = require('path');
 const cloudinary = require('cloudinary').v2;
 const multer = require('multer');
 const streamifier = require('streamifier');
@@ -21,14 +22,24 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// ─── Allowed mime types ────────────────────────────────────────────────
+// ─── Allowed mime types and extensions ────────────────────────────────
 const ALLOWED_MIMES = [
   'application/pdf',
+  'application/x-pdf',
+  'application/acrobat',
+  'applications/vnd.pdf',
+  'text/pdf',
+  'text/x-pdf',
   'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'image/jpeg',
+  'image/jpg',
   'image/png',
+  'image/webp',
+  'application/octet-stream',
 ];
+
+const ALLOWED_EXTENSIONS = ['.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png', '.webp'];
 
 // ─── Multer (memory storage) ───────────────────────────────────────────
 // Files land in req.file.buffer — we stream them to Cloudinary manually
@@ -36,7 +47,11 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB
   fileFilter: (req, file, cb) => {
-    if (ALLOWED_MIMES.includes(file.mimetype)) {
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    const isAllowedExt = ALLOWED_EXTENSIONS.includes(ext);
+    const isAllowedMime = ALLOWED_MIMES.includes(file.mimetype);
+
+    if (isAllowedExt || isAllowedMime) {
       cb(null, true);
     } else {
       cb(new Error('File type not supported. Allowed: PDF, DOC, DOCX, JPG, PNG.'), false);

@@ -5,15 +5,21 @@ const {
   getCourseById,
   createCourse,
   updateCourse,
+  toggleCourseStatus,
   deleteCourse,
 } = require('../controllers/courseController');
 const { protect } = require('../middleware/auth');
 const roleGuard = require('../middleware/roleGuard');
 
-router.get('/', protect, getCourses);           // ?departmentId=<id>
+// Any authenticated user can browse courses (students, contributors, admins)
+router.get('/', protect, getCourses);
 router.get('/:id', protect, getCourseById);
-router.post('/', protect, roleGuard('admin'), createCourse);
-router.put('/:id', protect, roleGuard('admin'), updateCourse);
-router.delete('/:id', protect, roleGuard('admin'), deleteCourse);
+
+// Course management — faculty_admin (own dept), admin, super_admin
+const adminRoles = roleGuard('faculty_admin', 'admin', 'super_admin');
+router.post('/', protect, adminRoles, createCourse);
+router.put('/:id', protect, adminRoles, updateCourse);
+router.patch('/:id/status', protect, adminRoles, toggleCourseStatus);
+router.delete('/:id', protect, adminRoles, deleteCourse);
 
 module.exports = router;

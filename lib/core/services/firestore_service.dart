@@ -46,9 +46,66 @@ class FirestoreService {
 
   // ─── Courses ──────────────────────────────────────────────────────────
 
+  /// Fetch ACTIVE courses for a department (used by students & contributors).
   Future<List<CourseModel>> getCourses(String departmentId) async {
-    final data = await _api.get('/api/courses?departmentId=$departmentId') as List<dynamic>;
+    final data = await _api.get('/api/courses?departmentId=$departmentId&status=active') as List<dynamic>;
     return data.map((e) => CourseModel.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  /// Fetch ALL courses (active + inactive) for a department — for admin management screens.
+  Future<List<CourseModel>> getCoursesAdmin(String departmentId) async {
+    final data = await _api.get(
+      '/api/courses?departmentId=$departmentId&includeAll=true',
+    ) as List<dynamic>;
+    return data.map((e) => CourseModel.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  /// Create a new course. Faculty Admin's departmentId is auto-filled by the backend.
+  Future<CourseModel> createCourse({
+    required String name,
+    required String code,
+    String? departmentId,
+    String semester = '',
+    String credit = '3',
+  }) async {
+    final data = await _api.post('/api/courses', {
+      'name': name,
+      'code': code,
+      if (departmentId != null) 'departmentId': departmentId,
+      'semester': semester,
+      'credit': num.tryParse(credit) ?? 3,
+    });
+    return CourseModel.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// Update an existing course.
+  Future<CourseModel> updateCourse(
+    String courseId, {
+    required String name,
+    required String code,
+    String semester = '',
+    String credit = '3',
+    String status = 'active',
+  }) async {
+    final data = await _api.put('/api/courses/$courseId', {
+      'name': name,
+      'code': code,
+      'semester': semester,
+      'credit': num.tryParse(credit) ?? 3,
+      'status': status,
+    });
+    return CourseModel.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// Toggle active/inactive status of a course.
+  Future<CourseModel> toggleCourseStatus(String courseId) async {
+    final data = await _api.patch('/api/courses/$courseId/status', {});
+    return CourseModel.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// Delete a course permanently.
+  Future<void> deleteCourse(String courseId) async {
+    await _api.delete('/api/courses/$courseId');
   }
 
   // ─── Materials — public browsing ──────────────────────────────────────

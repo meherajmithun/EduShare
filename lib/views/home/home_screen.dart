@@ -6,6 +6,7 @@ import 'package:edushare/core/services/firestore_service.dart';
 import 'package:edushare/models/department_model.dart';
 import 'package:edushare/models/course_model.dart';
 import 'package:edushare/models/user_model.dart';
+import 'package:edushare/core/role_helper.dart';
 import 'package:edushare/widgets/glass_card.dart';
 import 'package:edushare/widgets/notification_bell.dart';
 import 'package:edushare/views/course/course_details_screen.dart';
@@ -35,16 +36,39 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _loadData() async {
     try {
+      final authService = Provider.of<AuthService>(context, listen: false);
+      final user = authService.currentUser;
+
       final depts = await _firestoreService.getDepartments();
-      List<CourseModel> courses = [];
-      for (var dept in depts) {
-        final deptCourses = await _firestoreService.getCourses(dept.id);
-        courses.addAll(deptCourses);
+
+      DepartmentModel? userDept;
+      if (user != null && (user.isStudent || user.isContributor)) {
+        for (final dept in depts) {
+          if (dept.id == user.departmentId ||
+              dept.code == user.department ||
+              dept.name == user.department ||
+              user.department.contains(dept.code)) {
+            userDept = dept;
+            break;
+          }
+        }
       }
+
+      List<CourseModel> courses = [];
+      if (userDept != null) {
+        courses = await _firestoreService.getCourses(userDept.id);
+      } else {
+        for (var dept in depts) {
+          final deptCourses = await _firestoreService.getCourses(dept.id);
+          courses.addAll(deptCourses);
+        }
+      }
+
       setState(() {
         _departments = depts;
         _allCourses = courses;
         _filteredCourses = courses;
+        _selectedDept = userDept;
         _isLoading = false;
       });
     } catch (e) {

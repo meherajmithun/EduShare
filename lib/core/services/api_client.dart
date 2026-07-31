@@ -12,6 +12,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import 'package:edushare/core/app_config.dart';
 import 'package:edushare/core/exceptions/app_exception.dart';
 import 'package:edushare/core/services/session_service.dart';
@@ -151,6 +152,27 @@ class ApiClient {
     }
   }
 
+  Future<dynamic> patch(String path, Map<String, dynamic> body,
+      {bool auth = true}) async {
+    final headers = auth ? await _authHeaders() : _jsonHeaders;
+    try {
+      final response = await http
+          .patch(
+            Uri.parse('${AppConfig.baseUrl}$path'),
+            headers: headers,
+            body: jsonEncode(body),
+          )
+          .timeout(AppConfig.requestTimeout);
+      return _parse(response);
+    } on SocketException {
+      throw const NetworkException();
+    } on TimeoutException {
+      throw const NetworkException('Request timed out. Please try again.');
+    } on HttpException {
+      throw const NetworkException();
+    }
+  }
+
   /// Multipart POST for file uploads using raw bytes.
   /// [bytes] — the file content as Uint8List (always available via FilePicker withData:true).
   /// [fileName] — the original file name (used as Content-Disposition filename).
@@ -179,6 +201,7 @@ class ApiClient {
           fileField,
           bytes,
           filename: fileName,
+          contentType: _getContentType(fileName),
         ),
       );
 
@@ -192,6 +215,30 @@ class ApiClient {
       throw const NetworkException('Upload timed out. Please try again.');
     } catch (e) {
       throw UploadException('Upload failed: ${e.toString()}');
+    }
+  }
+
+  static MediaType? _getContentType(String fileName) {
+    final ext = fileName.toLowerCase().split('.').last;
+    switch (ext) {
+      case 'pdf':
+        return MediaType('application', 'pdf');
+      case 'doc':
+        return MediaType('application', 'msword');
+      case 'docx':
+        return MediaType(
+          'application',
+          'vnd.openxmlformats-officedocument.wordprocessingml.document',
+        );
+      case 'jpg':
+      case 'jpeg':
+        return MediaType('image', 'jpeg');
+      case 'png':
+        return MediaType('image', 'png');
+      case 'webp':
+        return MediaType('image', 'webp');
+      default:
+        return MediaType('application', 'octet-stream');
     }
   }
 }
