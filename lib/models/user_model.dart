@@ -14,6 +14,8 @@ class UserModel {
   final String? designation;
   final String? bio;
   final String? profilePhotoUrl;
+  final double avgRating;
+  final int totalRatings;
   final DateTime createdAt;
 
   const UserModel({
@@ -28,6 +30,8 @@ class UserModel {
     this.designation,
     this.bio,
     this.profilePhotoUrl,
+    this.avgRating = 0.0,
+    this.totalRatings = 0,
     required this.createdAt,
   });
 
@@ -43,6 +47,8 @@ class UserModel {
     String? designation,
     String? bio,
     String? profilePhotoUrl,
+    double? avgRating,
+    int? totalRatings,
     DateTime? createdAt,
   }) {
     return UserModel(
@@ -57,6 +63,8 @@ class UserModel {
       designation: designation ?? this.designation,
       bio: bio ?? this.bio,
       profilePhotoUrl: profilePhotoUrl ?? this.profilePhotoUrl,
+      avgRating: avgRating ?? this.avgRating,
+      totalRatings: totalRatings ?? this.totalRatings,
       createdAt: createdAt ?? this.createdAt,
     );
   }
@@ -76,6 +84,8 @@ class UserModel {
       designation: json['designation'] as String?,
       bio: json['bio'] as String?,
       profilePhotoUrl: json['profilePhotoUrl'] as String?,
+      avgRating: (json['avgRating'] as num?)?.toDouble() ?? 0.0,
+      totalRatings: (json['totalRatings'] as num?)?.toInt() ?? 0,
       createdAt: json['createdAt'] != null
           ? DateTime.tryParse(json['createdAt'].toString()) ?? DateTime.now()
           : DateTime.now(),
@@ -95,6 +105,8 @@ class UserModel {
       if (designation != null) 'designation': designation,
       if (bio != null) 'bio': bio,
       if (profilePhotoUrl != null) 'profilePhotoUrl': profilePhotoUrl,
+      'avgRating': avgRating,
+      'totalRatings': totalRatings,
       'createdAt': createdAt.toIso8601String(),
     };
   }

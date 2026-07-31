@@ -5,6 +5,8 @@ import 'package:edushare/core/theme.dart';
 import 'package:edushare/core/services/firestore_service.dart';
 import 'package:edushare/models/course_model.dart';
 import 'package:edushare/models/material_model.dart';
+import 'package:edushare/models/contributor_profile_model.dart';
+import 'package:edushare/views/profile/contributor_profile_screen.dart';
 import 'package:edushare/widgets/glass_card.dart';
 
 class CourseDetailsScreen extends StatefulWidget {
@@ -23,6 +25,7 @@ class _CourseDetailsScreenState extends State<CourseDetailsScreen> with SingleTi
   List<MaterialModel> _notes = [];
   List<MaterialModel> _assignments = [];
   List<MaterialModel> _videos = [];
+  Map<String, ContributorProfileModel> _contributorProfiles = {};
   bool _isLoading = true;
 
   @override
@@ -44,16 +47,34 @@ class _CourseDetailsScreenState extends State<CourseDetailsScreen> with SingleTi
       final assignments = await _firestoreService.getApprovedMaterials(widget.course.id, type: 'assignment');
       final videos = await _firestoreService.getApprovedMaterials(widget.course.id, type: 'video');
       
-      setState(() {
-        _notes = notes;
-        _assignments = assignments;
-        _videos = videos;
-        _isLoading = false;
-      });
+      final allMaterials = [...notes, ...assignments, ...videos];
+      final uniqueContributorIds = allMaterials.map((m) => m.uploadedBy).toSet();
+
+      final profilesMap = <String, ContributorProfileModel>{};
+      for (final id in uniqueContributorIds) {
+        if (id.isNotEmpty) {
+          try {
+            final profile = await _firestoreService.getContributorProfile(id);
+            profilesMap[id] = profile;
+          } catch (_) {}
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _notes = notes;
+          _assignments = assignments;
+          _videos = videos;
+          _contributorProfiles = profilesMap;
+          _isLoading = false;
+        });
+      }
     } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -249,26 +270,87 @@ class _CourseDetailsScreenState extends State<CourseDetailsScreen> with SingleTi
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    // Contributor Info
-                    Row(
-                      children: [
-                        CircleAvatar(
-                          radius: 12,
-                          backgroundColor: AppTheme.primaryColor,
-                          child: Text(
-                            mat.contributorName[0].toUpperCase(),
-                            style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                    // Tappable Contributor Info Chip with Rating
+                    InkWell(
+                      borderRadius: BorderRadius.circular(20),
+                      onTap: () async {
+                        if (mat.uploadedBy.isNotEmpty) {
+                          await Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => ContributorProfileScreen(
+                                contributorId: mat.uploadedBy,
+                                contributorName: mat.contributorName,
+                              ),
+                            ),
+                          );
+                          _loadMaterials(); // Refresh rating stats when coming back
+                        }
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primaryColor.withOpacity(0.08),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: AppTheme.primaryColor.withOpacity(0.2),
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Shared by ${mat.contributorName}',
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                          ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            CircleAvatar(
+                              radius: 11,
+                              backgroundColor: AppTheme.primaryColor,
+                              child: Text(
+                                mat.contributorName.isNotEmpty
+                                    ? mat.contributorName[0].toUpperCase()
+                                    : 'C',
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              mat.contributorName,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: AppTheme.primaryColor,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            // Average rating pill
+                            Builder(builder: (context) {
+                              final profile = _contributorProfiles[mat.uploadedBy];
+                              final avg = profile?.avgRating ?? 0.0;
+                              return Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.amber.withOpacity(0.2),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.star_rounded, color: Colors.amber, size: 12),
+                                    const SizedBox(width: 2),
+                                    Text(
+                                      avg > 0 ? avg.toStringAsFixed(1) : 'New',
+                                      style: const TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.amber,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
 
                     // Open / Play Button

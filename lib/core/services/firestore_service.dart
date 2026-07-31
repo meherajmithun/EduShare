@@ -9,6 +9,8 @@ import 'package:edushare/models/department_model.dart';
 import 'package:edushare/models/course_model.dart';
 import 'package:edushare/models/material_model.dart';
 import 'package:edushare/models/user_model.dart';
+import 'package:edushare/models/rating_model.dart';
+import 'package:edushare/models/contributor_profile_model.dart';
 
 class FirestoreService {
   final _api = ApiClient.instance;
@@ -276,5 +278,58 @@ class FirestoreService {
 
     final data = await _api.get(path) as List<dynamic>;
     return data.map((e) => UserModel.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  // ─── Contributor Rating System ─────────────────────────────────────────
+
+  /// Fetch public contributor profile
+  Future<ContributorProfileModel> getContributorProfile(String id) async {
+    final data = await _api.get('/api/contributors/$id/profile');
+    return ContributorProfileModel.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// Fetch approved materials uploaded by a specific contributor
+  Future<List<MaterialModel>> getContributorMaterials(String id) async {
+    final data = await _api.get('/api/contributors/$id/materials') as List<dynamic>;
+    return data.map((e) => MaterialModel.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  /// Fetch ratings for a contributor + current user's own rating
+  Future<Map<String, dynamic>> getContributorRatings(String id) async {
+    final data = await _api.get('/api/contributors/$id/ratings') as Map<String, dynamic>;
+    final ratingsList = (data['ratings'] as List<dynamic>? ?? [])
+        .map((e) => RatingModel.fromJson(e as Map<String, dynamic>))
+        .toList();
+    final myRating = data['myRating'] != null
+        ? RatingModel.fromJson(data['myRating'] as Map<String, dynamic>)
+        : null;
+
+    return {
+      'ratings': ratingsList,
+      'myRating': myRating,
+    };
+  }
+
+  /// Submit rating for a contributor (students only)
+  Future<RatingModel> addRating(String contributorId, int stars, {String? review}) async {
+    final data = await _api.post('/api/contributors/$contributorId/ratings', {
+      'stars': stars,
+      if (review != null && review.trim().isNotEmpty) 'review': review.trim(),
+    });
+    return RatingModel.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// Update an existing rating (students only)
+  Future<RatingModel> updateRating(String contributorId, int stars, {String? review}) async {
+    final data = await _api.put('/api/contributors/$contributorId/ratings', {
+      'stars': stars,
+      if (review != null) 'review': review.trim(),
+    });
+    return RatingModel.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// Delete an existing rating (students only)
+  Future<void> deleteRating(String contributorId) async {
+    await _api.delete('/api/contributors/$contributorId/ratings');
   }
 }

@@ -120,6 +120,20 @@ const userSchema = new mongoose.Schema(
       default: null,
     },
 
+    // ─── Contributor rating stats (denormalised for fast reads) ────────────
+    // Recalculated automatically whenever a Rating document is created/updated/deleted.
+    avgRating: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 5,
+    },
+    totalRatings: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
     // ─── Soft-delete flag ──────────────────────────────────────────────────
     isActive: {
       type: Boolean,

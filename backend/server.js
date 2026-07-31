@@ -22,6 +22,7 @@ const adminRoutes = require('./routes/adminRoutes');
 const userRoutes = require('./routes/userRoutes');
 const superAdminRoutes = require('./routes/superAdminRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
+const contributorRoutes = require('./routes/contributorRoutes');
 
 // ─── Bootstrap ────────────────────────────────────────────────────────
 const app = express();
@@ -71,6 +72,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/super-admin', superAdminRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/contributors', contributorRoutes);
 
 // ─── 404 handler ─────────────────────────────────────────────────────
 app.use((req, res) => {
