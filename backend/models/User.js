@@ -113,6 +113,13 @@ const userSchema = new mongoose.Schema(
       default: null,
     },
 
+    // ─── Push notifications ────────────────────────────────────────────────
+    fcmToken: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+
     // ─── Soft-delete flag ──────────────────────────────────────────────────
     isActive: {
       type: Boolean,

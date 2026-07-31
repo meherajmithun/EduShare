@@ -20,8 +20,12 @@ const assertDeptOwnership = (user, course) => {
   if (user.role === 'faculty_admin' || user.role === 'admin') {
     const courseDeptId = course.departmentId?.toString();
     const userDeptId = user.departmentId?.toString();
-    if (!userDeptId || courseDeptId !== userDeptId) {
-      throw createError('You can only manage courses in your own department.', 403);
+    if (userDeptId && courseDeptId) {
+      if (courseDeptId !== userDeptId) {
+        throw createError('You can only manage courses in your own department.', 403);
+      }
+    } else if (!userDeptId) {
+      throw createError('Your account has no department assigned. Contact a Super Admin.', 403);
     }
   }
 };
@@ -31,7 +35,11 @@ const getCourses = async (req, res) => {
   const { departmentId, includeAll } = req.query;
 
   const filter = {};
-  if (departmentId) filter.departmentId = departmentId;
+  if (departmentId) {
+    filter.departmentId = departmentId;
+  } else if (['faculty_admin', 'admin'].includes(req.user?.role) && req.user?.departmentId) {
+    filter.departmentId = req.user.departmentId;
+  }
 
   // By default only return active courses; admins can pass includeAll=true
   const isAdmin = ['faculty_admin', 'admin', 'super_admin'].includes(req.user?.role);
@@ -61,6 +69,19 @@ const createCourse = async (req, res) => {
 
   // faculty_admin and admin must use their own department
   if (req.user.role === 'faculty_admin' || req.user.role === 'admin') {
+    if (!req.user.departmentId && req.user.department) {
+      const escaped = req.user.department.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      let dept = await Department.findOne({ name: new RegExp('^' + escaped + '$', 'i') });
+      if (!dept) {
+        dept = await Department.create({
+          name: req.user.department,
+          code: req.user.department.substring(0, 4).toUpperCase().replace(/[^A-Z]/gi, '') || 'DEPT',
+        });
+      }
+      req.user.departmentId = dept._id;
+      await req.user.save();
+    }
+
     if (!req.user.departmentId) {
       throw createError('Your account has no department assigned. Contact a Super Admin.', 403);
     }
@@ -75,10 +96,10 @@ const createCourse = async (req, res) => {
   if (!dept) throw createError('Department not found.', 404);
 
   const course = await Course.create({
-    name,
-    code,
+    name: name.trim(),
+    code: code.trim().toUpperCase(),
     departmentId,
-    semester: semester || '',
+    semester: semester ? semester.trim() : '',
     credit: credit !== undefined ? Number(credit) : 3,
     status: 'active',
   });

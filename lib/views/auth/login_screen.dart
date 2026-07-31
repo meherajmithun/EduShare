@@ -38,24 +38,50 @@ class _LoginScreenState extends State<LoginScreen> {
   void _handleLogin() async {
     if (_formKey.currentState!.validate()) {
       final authService = Provider.of<AuthService>(context, listen: false);
+      final email = _emailController.text.trim();
+
+      // Check account status before login attempt
+      final statusData = await authService.getAccountStatus(email);
+      if (statusData != null) {
+        final status = statusData['status'] as String?;
+        if (status == 'pending') {
+          if (mounted) {
+            _showStatusMessage(
+              statusData['message'] as String? ?? 'Your Admin application is still under review.',
+              isWarning: true,
+            );
+          }
+          return;
+        } else if (status == 'rejected') {
+          final reason = statusData['rejectionReason'] as String? ?? 'No reason provided.';
+          final msg = (statusData['message'] as String?) ??
+              'Your Admin application was rejected. Reason: $reason';
+          if (mounted) {
+            _showStatusMessage(msg, isError: true);
+          }
+          return;
+        } else if (status == 'disabled') {
+          if (mounted) {
+            _showStatusMessage(
+              statusData['message'] as String? ?? 'Your account has been disabled.',
+              isError: true,
+            );
+          }
+          return;
+        }
+      }
+
       // Map UI role to backend role value
       final backendRole = _uiToBackendRole[_selectedRole] ?? _selectedRole;
       final error = await authService.login(
-        _emailController.text.trim(),
+        email,
         _passwordController.text,
         backendRole,
       );
 
       if (error != null) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(error),
-              backgroundColor: const Color(0xFFEF4444),
-              behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-          );
+          _showStatusMessage(error, isError: true);
         }
       } else {
         if (mounted) {
@@ -66,6 +92,21 @@ class _LoginScreenState extends State<LoginScreen> {
         }
       }
     }
+  }
+
+  void _showStatusMessage(String message, {bool isWarning = false, bool isError = false}) {
+    final color = isError
+        ? const Color(0xFFEF4444)
+        : (isWarning ? const Color(0xFFF59E0B) : AppTheme.primaryColor);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: color,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        duration: const Duration(seconds: 4),
+      ),
+    );
   }
 
   @override

@@ -53,6 +53,20 @@ const approveFacultyAdmin = async (req, res) => {
   admin.verifiedBy = req.user._id;
   admin.verifiedAt = new Date();
   admin.rejectionReason = null;
+
+  if (admin.department && !admin.departmentId) {
+    const Department = require('../models/Department');
+    const escaped = admin.department.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    let dept = await Department.findOne({ name: new RegExp('^' + escaped + '$', 'i') });
+    if (!dept) {
+      dept = await Department.create({
+        name: admin.department,
+        code: admin.department.substring(0, 4).toUpperCase().replace(/[^A-Z]/gi, '') || 'DEPT',
+      });
+    }
+    admin.departmentId = dept._id;
+  }
+
   await admin.save();
 
   // ── Notify the Admin (fire-and-forget) ────────────────────────────────

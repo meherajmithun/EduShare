@@ -98,19 +98,37 @@ const notifySuperAdminOnNewAdmin = async ({ newAdmin }) => {
   }
 };
 
+const sendPushNotificationIfFcmExists = async (user, title, body) => {
+  if (user && user.fcmToken && global.adminFcm) {
+    try {
+      await global.adminFcm.messaging().send({
+        token: user.fcmToken,
+        notification: { title, body },
+      });
+    } catch (err) {
+      console.error('[NotificationService] Push notification error:', err.message);
+    }
+  }
+};
+
 /**
  * Notify the Admin that their account has been approved by the Super Admin.
  */
 const notifyAdminOnApproval = async ({ admin, superAdmin }) => {
   try {
+    const title = 'Account Approved ✓';
+    const message = `Your Admin account has been approved by ${superAdmin.name}. You can now log in to EduShare.`;
+
     await Notification.create({
       recipient: admin._id,
       sender: superAdmin._id,
       senderName: superAdmin.name,
-      title: 'Account Approved ✓',
-      message: `Your Admin account has been approved by ${superAdmin.name}. You can now log in to EduShare.`,
+      title,
+      message,
       type: 'admin_approved',
     });
+
+    await sendPushNotificationIfFcmExists(admin, title, message);
   } catch (err) {
     console.error('[NotificationService] Failed to notify Admin on approval:', err.message);
   }
@@ -124,15 +142,19 @@ const notifyAdminOnRejection = async ({ admin, superAdmin, reason }) => {
     const reasonText = reason && reason.trim()
       ? reason.trim()
       : 'No reason provided.';
+    const title = 'Account Registration Rejected';
+    const message = `Your Admin registration was rejected by ${superAdmin.name}. Reason: ${reasonText}`;
 
     await Notification.create({
       recipient: admin._id,
       sender: superAdmin._id,
       senderName: superAdmin.name,
-      title: 'Account Registration Rejected',
-      message: `Your Admin registration was rejected by ${superAdmin.name}. Reason: ${reasonText}`,
+      title,
+      message,
       type: 'admin_rejected',
     });
+
+    await sendPushNotificationIfFcmExists(admin, title, message);
   } catch (err) {
     console.error('[NotificationService] Failed to notify Admin on rejection:', err.message);
   }

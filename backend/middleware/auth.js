@@ -8,6 +8,7 @@
 const jwt = require('jsonwebtoken');
 const { createError } = require('../utils/apiResponse');
 const User = require('../models/User');
+const Department = require('../models/Department');
 
 const protect = async (req, res, next) => {
   let token;
@@ -38,6 +39,24 @@ const protect = async (req, res, next) => {
 
     if (user.status !== 'active') {
       throw createError(`Your account is ${user.status}. Access denied.`, 403);
+    }
+
+    // Auto-resolve missing departmentId for users with a department name string
+    if (user.department && !user.departmentId) {
+      try {
+        const escaped = user.department.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        let dept = await Department.findOne({ name: new RegExp('^' + escaped + '$', 'i') });
+        if (!dept) {
+          dept = await Department.create({
+            name: user.department,
+            code: user.department.substring(0, 4).toUpperCase().replace(/[^A-Z]/gi, '') || 'DEPT',
+          });
+        }
+        user.departmentId = dept._id;
+        await user.save();
+      } catch (e) {
+        console.error('[AuthMiddleware] Auto-assign departmentId failed:', e.message);
+      }
     }
 
     req.user = user; // Available to all subsequent handlers

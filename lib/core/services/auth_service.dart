@@ -5,7 +5,6 @@
 /// registerFacultyAdmin() does NOT log the user in — it submits the
 /// application and returns success/error without persisting a token.
 
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:edushare/models/user_model.dart';
 import 'package:edushare/core/services/api_client.dart';
@@ -69,6 +68,22 @@ class AuthService extends ChangeNotifier {
       _currentUser = null;
     } catch (_) {
       _currentUser = await _session.getUser();
+    }
+  }
+
+  // ─── Check Account Status ──────────────────────────────────────────────
+  Future<Map<String, dynamic>?> getAccountStatus(String email) async {
+    try {
+      final data = await _api.get(
+        '/api/auth/account-status?email=${Uri.encodeComponent(email.trim().toLowerCase())}',
+        auth: false,
+      );
+      if (data is Map<String, dynamic>) {
+        return data;
+      }
+      return null;
+    } catch (_) {
+      return null;
     }
   }
 

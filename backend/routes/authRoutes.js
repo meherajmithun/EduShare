@@ -3,6 +3,7 @@ const router = express.Router();
 const {
   register,
   registerFacultyAdmin,
+  getAccountStatus,
   login,
   getProfile,
   updateProfile,
@@ -13,6 +14,7 @@ const { upload } = require('../services/cloudinaryService');
 
 router.post('/register', register);
 router.post('/register-faculty-admin', registerFacultyAdmin);
+router.get('/account-status', getAccountStatus);
 router.post('/login', login);
 router.get('/profile', protect, getProfile);
 router.put('/profile', protect, updateProfile);

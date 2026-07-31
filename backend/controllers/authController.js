@@ -105,12 +105,26 @@ const register = async (req, res) => {
 
   // ── Admin / Faculty Admin → pending approval ──────────────────────────────
   if (role === 'admin' || role === 'faculty_admin') {
+    let deptId = null;
+    if (department) {
+      const escaped = department.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      let dept = await Department.findOne({ name: new RegExp('^' + escaped + '$', 'i') });
+      if (!dept) {
+        dept = await Department.create({
+          name: department.trim(),
+          code: department.trim().substring(0, 4).toUpperCase().replace(/[^A-Z]/gi, '') || 'DEPT',
+        });
+      }
+      deptId = dept._id;
+    }
+
     const adminUser = await User.create({
       name,
       email,
       password,
       role: 'faculty_admin',
-      department,
+      department: department.trim(),
+      departmentId: deptId,
       facultyId: facultyId || '',
       designation: designation || '',
       status: 'pending', // Blocked until Super Admin approves
@@ -122,13 +136,28 @@ const register = async (req, res) => {
     return res.status(201).json(
       success(
         { pending: true, userId: adminUser._id.toString() },
-        'Admin registration submitted successfully. Awaiting Super Admin approval.'
+        'Your Admin application is waiting for Super Admin approval.'
       )
     );
   }
 
   // ── Student → active immediately ───────────────────────────────────────
-  const user = await User.create({ name, email, password, role, department, status: 'active' });
+  let studentDeptId = null;
+  if (department) {
+    const escaped = department.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    let dept = await Department.findOne({ name: new RegExp('^' + escaped + '$', 'i') });
+    if (dept) studentDeptId = dept._id;
+  }
+
+  const user = await User.create({
+    name,
+    email,
+    password,
+    role,
+    department: department.trim(),
+    departmentId: studentDeptId,
+    status: 'active',
+  });
   const token = signToken(user._id);
 
   res.status(201).json(
@@ -189,7 +218,46 @@ const registerFacultyAdmin = async (req, res) => {
   res.status(201).json(
     success(
       { userId: user._id.toString() },
-      'Admin registration submitted successfully. Awaiting Super Admin approval.'
+      'Your Admin application is waiting for Super Admin approval.'
+    )
+  );
+};
+
+// ─── GET /api/auth/account-status?email= ──────────────────────────────
+const getAccountStatus = async (req, res) => {
+  const { email } = req.query;
+  if (!email || !email.trim()) {
+    throw createError('Email parameter is required.', 400);
+  }
+
+  const user = await User.findOne({ email: email.toLowerCase().trim() });
+  if (!user) {
+    throw createError('No account found with this email address.', 404);
+  }
+
+  let message = 'Account is active.';
+  if (user.status === 'pending') {
+    message = (user.role === 'admin' || user.role === 'faculty_admin')
+      ? 'Your Admin application is still under review.'
+      : 'Your contributor account is still under review.';
+  } else if (user.status === 'rejected') {
+    const reason = user.rejectionReason || 'No reason provided.';
+    message = (user.role === 'admin' || user.role === 'faculty_admin')
+      ? `Your Admin application was rejected. Reason: ${reason}`
+      : `Your contributor registration was rejected. Reason: ${reason}`;
+  } else if (user.status === 'disabled') {
+    message = 'Your account has been disabled. Please contact support.';
+  }
+
+  res.json(
+    success(
+      {
+        status: user.status,
+        role: user.role,
+        message,
+        rejectionReason: user.rejectionReason || null,
+      },
+      'Account status fetched.'
     )
   );
 };
@@ -239,7 +307,7 @@ const login = async (req, res) => {
       );
     }
     throw createError(
-      'Your Admin registration is pending Super Admin approval. You will be notified once approved.',
+      'Your Admin application is still under review.',
       403
     );
   }
@@ -253,14 +321,14 @@ const login = async (req, res) => {
       );
     }
     throw createError(
-      `Your Admin registration was rejected. Reason: ${reason}`,
+      `Your Admin application was rejected. Reason: ${reason}`,
       403
     );
   }
 
   if (user.status === 'disabled') {
     throw createError(
-      'Your account has been disabled. Please contact the administrator.',
+      'Your account has been disabled. Please contact support.',
       403
     );
   }
@@ -317,6 +385,7 @@ const uploadProfilePhoto = async (req, res) => {
 module.exports = {
   register,
   registerFacultyAdmin,
+  getAccountStatus,
   login,
   getProfile,
   updateProfile,

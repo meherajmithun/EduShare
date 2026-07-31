@@ -15,14 +15,20 @@ const { createError } = require('../utils/apiResponse');
  * @param  {...string} roles - Allowed roles
  */
 const roleGuard = (...roles) => {
+  const allowed = new Set(roles);
+  if (allowed.has('admin') || allowed.has('faculty_admin')) {
+    allowed.add('admin');
+    allowed.add('faculty_admin');
+  }
+
   return (req, res, next) => {
     if (!req.user) {
       throw createError('Not authenticated.', 401);
     }
 
-    if (!roles.includes(req.user.role)) {
+    if (!allowed.has(req.user.role)) {
       throw createError(
-        `Access denied. This action requires one of the following roles: ${roles.join(', ')}.`,
+        `Access denied. This action requires one of the following roles: ${Array.from(allowed).join(', ')}.`,
         403
       );
     }
@@ -32,20 +38,22 @@ const roleGuard = (...roles) => {
 };
 
 /**
- * Ensures a Faculty Admin can only access resources matching their own department.
- * For other roles (admin, super_admin), this middleware is a no-op pass-through.
+ * Ensures a Faculty Admin / Admin can only access resources matching their own department.
+ * For super_admin, this middleware is a pass-through.
  *
  * Must be used AFTER protect + roleGuard.
  * Injects `req.departmentFilter` for controllers to use in DB queries.
  */
 const departmentGuard = (req, res, next) => {
-  if (req.user.role === 'faculty_admin') {
-    if (!req.user.department) {
-      throw createError('Faculty Admin has no department assigned.', 403);
+  if (req.user.role === 'faculty_admin' || req.user.role === 'admin') {
+    if (!req.user.department && !req.user.departmentId) {
+      throw createError('Your account has no department assigned. Contact a Super Admin.', 403);
     }
-    req.departmentFilter = { department: req.user.department };
+    req.departmentFilter = req.user.departmentId
+      ? { departmentId: req.user.departmentId }
+      : { department: req.user.department };
   } else {
-    req.departmentFilter = {}; // Super Admin / admin sees all
+    req.departmentFilter = {}; // Super Admin sees all
   }
   next();
 };

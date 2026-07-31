@@ -31,11 +31,7 @@ class _ManageCoursesScreenState extends State<ManageCoursesScreen> {
     setState(() => _isLoading = true);
     try {
       final user = Provider.of<AuthService>(context, listen: false).currentUser;
-      _deptId = user?.departmentId;
-      if (_deptId == null || _deptId!.isEmpty) {
-        if (mounted) setState(() => _isLoading = false);
-        return;
-      }
+      _deptId = user?.departmentId ?? '';
       final courses = await _service.getCoursesAdmin(_deptId!);
       if (mounted) setState(() { _courses = courses; _isLoading = false; });
     } catch (_) {
