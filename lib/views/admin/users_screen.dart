@@ -8,7 +8,7 @@ import 'package:edushare/models/user_model.dart';
 import 'package:edushare/widgets/glass_card.dart';
 
 /// User management screen for admin-class roles.
-/// Super Admin: sees all roles.
+/// Super Admin: sees all roles across system.
 /// Faculty Admin: sees only their department's users.
 class UsersScreen extends StatefulWidget {
   const UsersScreen({Key? key}) : super(key: key);
@@ -84,13 +84,30 @@ class _UsersScreenState extends State<UsersScreen> {
     }
   }
 
-  Future<void> _deactivateUser(UserModel user) async {
+  bool _canManageUser(UserModel? currentUser, UserModel targetUser) {
+    if (currentUser == null) return false;
+    if (targetUser.uid == currentUser.uid) return false;
+
+    if (currentUser.isSuperAdmin) {
+      return true;
+    }
+
+    if (currentUser.isAnyAdmin) {
+      return targetUser.isStudent || targetUser.isContributor;
+    }
+
+    return false;
+  }
+
+  Future<void> _deleteUser(UserModel user) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Deactivate User',
+        title: const Text('Delete User',
             style: TextStyle(fontWeight: FontWeight.bold)),
-        content: Text('Deactivate ${user.name}\'s account?'),
+        content: Text(
+          'Permanently delete ${user.name}\'s account (${user.roleLabel}) from EduShare?\n\nThis cannot be undone.',
+        ),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
@@ -99,8 +116,8 @@ class _UsersScreenState extends State<UsersScreen> {
             style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFFEF4444)),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Deactivate',
-                style: TextStyle(color: Colors.white)),
+            child: const Text('Delete Permanently',
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -114,7 +131,7 @@ class _UsersScreenState extends State<UsersScreen> {
         _users.removeWhere((u) => u.uid == user.uid);
         _applyFilter();
       });
-      _showSnack('${user.name}\'s account deactivated.', const Color(0xFFF59E0B));
+      _showSnack('${user.name}\'s account permanently deleted.', const Color(0xFFEF4444));
     } catch (e) {
       _showSnack('Failed: $e', const Color(0xFFEF4444));
     }
@@ -239,14 +256,13 @@ class _UsersScreenState extends State<UsersScreen> {
                             itemCount: _filtered.length,
                             itemBuilder: (context, index) {
                               final user = _filtered[index];
+                              final canManage = _canManageUser(currentUser, user);
                               return Container(
                                 margin: const EdgeInsets.only(bottom: 10),
                                 child: _UserCard(
                                   user: user,
-                                  canManage: currentUser != null &&
-                                      currentUser.isAnyAdmin &&
-                                      user.uid != currentUser.uid,
-                                  onDeactivate: () => _deactivateUser(user),
+                                  canManage: canManage,
+                                  onDelete: () => _deleteUser(user),
                                 ),
                               );
                             },
@@ -262,12 +278,12 @@ class _UsersScreenState extends State<UsersScreen> {
 class _UserCard extends StatelessWidget {
   final UserModel user;
   final bool canManage;
-  final VoidCallback onDeactivate;
+  final VoidCallback onDelete;
 
   const _UserCard({
     required this.user,
     required this.canManage,
-    required this.onDeactivate,
+    required this.onDelete,
   });
 
   Color _roleColor() {
@@ -342,10 +358,10 @@ class _UserCard extends StatelessWidget {
           ),
           if (canManage)
             IconButton(
-              icon: const Icon(Icons.person_off_outlined,
+              icon: const Icon(Icons.delete_forever_outlined,
                   color: Color(0xFFEF4444), size: 20),
-              tooltip: 'Deactivate',
-              onPressed: onDeactivate,
+              tooltip: 'Delete User',
+              onPressed: onDelete,
             ),
         ],
       ),

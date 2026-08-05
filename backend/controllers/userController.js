@@ -4,12 +4,23 @@
  * Super Admin: can manage all users across all roles.
  * Faculty Admin: can view only users in their own department.
  * Legacy Admin: global access (backward compatibility).
+ *
+ * DELETE performs a HARD delete for student/contributor accounts.
+ * Admin-class accounts (admin, faculty_admin, super_admin) are protected.
  */
 
 const User = require('../models/User');
+const Material = require('../models/Material');
+const Notification = require('../models/Notification');
+const MaterialRating = require('../models/MaterialRating');
+const VideoProgress = require('../models/VideoProgress');
+const VideoBookmark = require('../models/VideoBookmark');
+const VideoComment = require('../models/VideoComment');
+const { deleteFile } = require('../services/cloudinaryService');
 const { success, createError } = require('../utils/apiResponse');
 
 const VALID_ROLES = ['student', 'contributor', 'admin', 'faculty_admin', 'super_admin'];
+const PROTECTED_ROLES = ['admin', 'faculty_admin', 'super_admin'];
 
 // ─── GET /api/users ────────────────────────────────────────────────────
 const getUsers = async (req, res) => {
@@ -77,16 +88,48 @@ const updateUserRole = async (req, res) => {
 };
 
 // ─── DELETE /api/users/:id ─────────────────────────────────────────────
-// Soft-delete (deactivate) a user account
+// Hard-deletes a student or contributor from the database.
+// Admin-class roles are fully protected and cannot be deleted here.
 const deleteUser = async (req, res) => {
   if (req.params.id === req.user._id.toString()) {
     throw createError('You cannot delete your own account.', 400);
   }
 
-  const user = await User.findByIdAndUpdate(req.params.id, { isActive: false }, { new: true });
+  const user = await User.findById(req.params.id);
   if (!user) throw createError('User not found.', 404);
 
-  res.json(success(null, 'User account deactivated.'));
+  // Block deletion of any admin-class account via this endpoint
+  if (PROTECTED_ROLES.includes(user.role)) {
+    throw createError(
+      'Admin accounts must be managed via the Admin management endpoint.',
+      403
+    );
+  }
+
+  // Faculty Admin can only delete users from their own department
+  if (req.user.role === 'faculty_admin' && user.department !== req.user.department) {
+    throw createError('Access denied. User is not in your department.', 403);
+  }
+
+  const userId = req.params.id;
+
+  // Delete Cloudinary profile photo if exists
+  if (user.profilePhotoPublicId) {
+    try { await deleteFile(user.profilePhotoPublicId); } catch (_) {}
+  }
+
+  // Hard delete: remove user and ALL associated data in parallel
+  await Promise.all([
+    User.findByIdAndDelete(userId),
+    Material.deleteMany({ uploadedBy: userId }),
+    Notification.deleteMany({ $or: [{ recipient: userId }, { sender: userId }] }),
+    MaterialRating.deleteMany({ ratedBy: userId }),
+    VideoProgress.deleteMany({ userId }),
+    VideoBookmark.deleteMany({ userId }),
+    VideoComment.deleteMany({ userId }),
+  ]);
+
+  res.json(success(null, `${user.name}'s account has been permanently deleted.`));
 };
 
 module.exports = { getUsers, getUserById, updateUserRole, deleteUser };

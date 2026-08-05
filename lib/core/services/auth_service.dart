@@ -4,8 +4,15 @@
 ///
 /// registerFacultyAdmin() does NOT log the user in — it submits the
 /// application and returns success/error without persisting a token.
+///
+/// New in this version:
+///   - loginWithStudentId()  — student-only alternative login
+///   - getAccountStatusByStudentId() — pre-check by student ID
+///   - rememberMe support   — persists identifier+role to secure storage (NEVER password)
+///   - biometric / Quick Login — uses local_auth to re-authenticate existing token
 
 import 'package:flutter/foundation.dart';
+import 'package:local_auth/local_auth.dart';
 import 'package:edushare/models/user_model.dart';
 import 'package:edushare/core/services/api_client.dart';
 import 'package:edushare/core/services/session_service.dart';
@@ -14,16 +21,21 @@ import 'package:edushare/core/exceptions/app_exception.dart';
 class AuthService extends ChangeNotifier {
   final _api = ApiClient.instance;
   final _session = SessionService.instance;
+  final _localAuth = LocalAuthentication();
 
   UserModel? _currentUser;
   bool _isLoading = false;
-  /// True when the last register() call resulted in a pending contributor account.
-  /// Reset to false on the next register() call.
   bool _isLastRegistrationPending = false;
+
+  // ─── Quick Login state ─────────────────────────────────────────────────
+  bool _quickLoginEnabled = false;
+  bool _biometricsAvailable = false;
 
   UserModel? get currentUser => _currentUser;
   bool get isLoading => _isLoading;
   bool get isLastRegistrationPending => _isLastRegistrationPending;
+  bool get quickLoginEnabled => _quickLoginEnabled;
+  bool get biometricsAvailable => _biometricsAvailable;
 
   // ─── Allowed university email domains (client-side pre-validation) ─────
   static const List<String> allowedDomains = ['bubt.edu.bd'];
@@ -54,9 +66,27 @@ class AuthService extends ChangeNotifier {
     return null;
   }
 
+  static String? validateStudentId(String? id) {
+    if (id == null || id.trim().isEmpty) return 'Please enter your Student ID';
+    if (id.trim().length < 4) return 'Student ID must be at least 4 characters';
+    return null;
+  }
+
   // ─── Session restoration (called at app startup) ───────────────────────
   Future<void> restoreSession() async {
     final token = await _session.getToken();
+
+    // Load Quick Login preference
+    _quickLoginEnabled = await _session.getQuickLoginEnabled();
+
+    // Check biometrics availability
+    try {
+      _biometricsAvailable = await _localAuth.canCheckBiometrics ||
+          await _localAuth.isDeviceSupported();
+    } catch (_) {
+      _biometricsAvailable = false;
+    }
+
     if (token == null) return;
 
     try {
@@ -71,24 +101,65 @@ class AuthService extends ChangeNotifier {
     }
   }
 
-  // ─── Check Account Status ──────────────────────────────────────────────
+  // ─── Biometric / Quick Login ───────────────────────────────────────────
+  /// Returns true if biometric authentication succeeded.
+  Future<bool> authenticateWithBiometrics() async {
+    try {
+      final authenticated = await _localAuth.authenticate(
+        localizedReason: 'Sign in to EduShare',
+        options: const AuthenticationOptions(
+          biometricOnly: false, // allow PIN/pattern fallback
+          stickyAuth: true,
+        ),
+      );
+      return authenticated;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Enable or disable Quick Login and persist the preference.
+  Future<void> setQuickLoginEnabled(bool enabled) async {
+    _quickLoginEnabled = enabled;
+    await _session.setQuickLoginEnabled(enabled);
+    notifyListeners();
+  }
+
+  // ─── Check Account Status by Email ────────────────────────────────────
   Future<Map<String, dynamic>?> getAccountStatus(String email) async {
     try {
       final data = await _api.get(
         '/api/auth/account-status?email=${Uri.encodeComponent(email.trim().toLowerCase())}',
         auth: false,
       );
-      if (data is Map<String, dynamic>) {
-        return data;
-      }
+      if (data is Map<String, dynamic>) return data;
       return null;
     } catch (_) {
       return null;
     }
   }
 
-  // ─── Login ─────────────────────────────────────────────────────────────
-  Future<String?> login(String email, String password, String role) async {
+  // ─── Check Account Status by Student ID ───────────────────────────────
+  Future<Map<String, dynamic>?> getAccountStatusByStudentId(String studentId) async {
+    try {
+      final data = await _api.get(
+        '/api/auth/account-status?studentId=${Uri.encodeComponent(studentId.trim())}',
+        auth: false,
+      );
+      if (data is Map<String, dynamic>) return data;
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // ─── Login (email + password) ──────────────────────────────────────────
+  Future<String?> login(
+    String email,
+    String password,
+    String role, {
+    bool rememberMe = false,
+  }) async {
     _isLoading = true;
     notifyListeners();
 
@@ -104,6 +175,68 @@ class AuthService extends ChangeNotifier {
 
       await _session.saveToken(token);
       await _session.saveUser(user);
+
+      // Remember Me — persist identifier (never password)
+      if (rememberMe) {
+        await _session.saveRememberMe(
+          rememberMe: true,
+          identifier: email.trim().toLowerCase(),
+          role: role,
+          method: 'email',
+        );
+      } else {
+        await _session.clearRememberMe();
+      }
+
+      _currentUser = user;
+      _isLoading = false;
+      notifyListeners();
+      return null;
+    } on AppException catch (e) {
+      _isLoading = false;
+      notifyListeners();
+      return e.message;
+    } catch (e) {
+      _isLoading = false;
+      notifyListeners();
+      return 'An unexpected error occurred. Please try again.';
+    }
+  }
+
+  // ─── Login (studentId + password) — students only ─────────────────────
+  Future<String?> loginWithStudentId(
+    String studentId,
+    String password,
+    String role, {
+    bool rememberMe = false,
+  }) async {
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      final data = await _api.post(
+        '/api/auth/login',
+        {'studentId': studentId.trim(), 'password': password, 'role': role},
+        auth: false,
+      );
+
+      final token = data['token'] as String;
+      final user = UserModel.fromJson(data['user'] as Map<String, dynamic>);
+
+      await _session.saveToken(token);
+      await _session.saveUser(user);
+
+      // Remember Me — persist student ID (never password)
+      if (rememberMe) {
+        await _session.saveRememberMe(
+          rememberMe: true,
+          identifier: studentId.trim(),
+          role: role,
+          method: 'studentId',
+        );
+      } else {
+        await _session.clearRememberMe();
+      }
 
       _currentUser = user;
       _isLoading = false;
@@ -123,15 +256,15 @@ class AuthService extends ChangeNotifier {
   // ─── Register (student, contributor, legacy admin) ──────────────────────
   //
   // Contributor path: backend returns {pending:true} — no token issued.
-  //   _isLastRegistrationPending is set to true so the caller can navigate
-  //   to a pending screen instead of MainShell.
   // Student path: backend returns {token, user} — logged in immediately.
+  // Optional studentId is passed for student registration.
   Future<String?> register({
     required String name,
     required String email,
     required String password,
     required String department,
     required String role,
+    String? studentId,
   }) async {
     final emailError = validateEmail(email);
     if (emailError != null) return emailError;
@@ -149,6 +282,8 @@ class AuthService extends ChangeNotifier {
           'password': password,
           'role': role,
           'department': department,
+          if (studentId != null && studentId.trim().isNotEmpty)
+            'studentId': studentId.trim(),
         },
         auth: false,
       );
@@ -300,7 +435,7 @@ class AuthService extends ChangeNotifier {
 
   // ─── Sign out ──────────────────────────────────────────────────────────
   Future<void> signOut() async {
-    await _session.clearAll();
+    await _session.clearAll(); // clears token + user, keeps rememberMe + quickLogin prefs
     _currentUser = null;
     notifyListeners();
   }

@@ -1,7 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:edushare/core/theme.dart';
+import 'package:edushare/core/services/auth_service.dart';
 import 'package:edushare/main.dart';
+import 'package:edushare/views/shell/main_shell.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({Key? key}) : super(key: key);
@@ -36,19 +39,41 @@ class _SplashScreenState extends State<SplashScreen>
 
     _controller.forward();
 
-    // Navigate after 1.2 seconds (animation completes in 900ms)
-    Timer(const Duration(milliseconds: 1200), () {
-      if (mounted) {
+    // Navigate after 1.2 s (animation completes in 900 ms)
+    Timer(const Duration(milliseconds: 1200), _navigate);
+  }
+
+  Future<void> _navigate() async {
+    if (!mounted) return;
+    final auth = Provider.of<AuthService>(context, listen: false);
+
+    // If a valid session exists AND Quick Login is enabled → try biometrics first
+    if (auth.currentUser != null && auth.quickLoginEnabled && auth.biometricsAvailable) {
+      final ok = await auth.authenticateWithBiometrics();
+      if (!mounted) return;
+      if (ok) {
         Navigator.of(context).pushReplacement(
           PageRouteBuilder(
-            pageBuilder: (_, __, ___) => const AuthWrapper(),
+            pageBuilder: (_, __, ___) => const MainShell(),
             transitionDuration: const Duration(milliseconds: 500),
             transitionsBuilder: (_, anim, __, child) =>
                 FadeTransition(opacity: anim, child: child),
           ),
         );
+        return;
       }
-    });
+      // Biometric failed — fall through to AuthWrapper (LoginScreen)
+    }
+
+    Navigator.of(context).pushReplacement(
+      PageRouteBuilder(
+        pageBuilder: (_, __, ___) => const AuthWrapper(),
+        transitionDuration: const Duration(milliseconds: 500),
+        transitionsBuilder: (_, anim, __, child) =>
+            FadeTransition(opacity: anim, child: child),
+      ),
+    );
+
   }
 
   @override

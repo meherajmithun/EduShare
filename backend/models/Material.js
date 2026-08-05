@@ -140,6 +140,33 @@ const materialSchema = new mongoose.Schema(
       trim: true,
       default: null,
     },
+
+    // Admin review comment — visible to contributor after approve OR reject
+    reviewComment: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+
+    // ─── Per-material rating stats (denormalised for fast reads) ──────────
+    // Recalculated automatically when a MaterialRating is created/updated/deleted.
+    avgRating: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 5,
+    },
+    totalRatings: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    // View counter for videos and materials
+    views: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
   },
   {
     timestamps: true, // createdAt + updatedAt

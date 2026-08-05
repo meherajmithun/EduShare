@@ -220,14 +220,96 @@ const notifyContributorOnAccountRejection = async ({ contributor, admin, reason 
   }
 };
 
+/**
+ * Notify all active students in the material's department that a new resource is available.
+ * Fires (fire-and-forget) after a material is approved.
+ */
+const notifyStudentsOnMaterialApproval = async ({ material }) => {
+  try {
+    if (!material.departmentId) return;
+
+    // Find all active students in this department
+    const students = await User.find({
+      role: 'student',
+      status: 'active',
+      isActive: true,
+      departmentId: material.departmentId,
+    }).select('_id');
+
+    if (!students.length) return;
+
+    const notifications = students.map((s) => ({
+      recipient: s._id,
+      sender: material.uploadedBy,
+      senderName: material.contributorName,
+      title: 'New Material Available \uD83D\uDCDA',
+      message: `A new ${material.type} “${material.title}” has been approved and is now available in your department.`,
+      type: 'material_published',
+      materialId: material._id,
+      materialTitle: material.title,
+    }));
+
+    await Notification.insertMany(notifications, { ordered: false });
+  } catch (err) {
+    console.error('[NotificationService] Failed to notify students on material approval:', err.message);
+  }
+};
+
+/**
+ * Notify the contributor that a student submitted a rating for their material.
+ */
+const notifyContributorOnRatingSubmitted = async ({ material, student }) => {
+  try {
+    if (!material || !material.uploadedBy) return;
+
+    await Notification.create({
+      recipient: material.uploadedBy,
+      sender: student._id,
+      senderName: student.name,
+      title: 'New Material Rating \u2B50',
+      message: `${student.name} rated your material “${material.title}”.`,
+      type: 'rating_submitted',
+      materialId: material._id,
+      materialTitle: material.title,
+    });
+  } catch (err) {
+    console.error('[NotificationService] Failed to notify contributor on rating submitted:', err.message);
+  }
+};
+
+/**
+ * Notify the contributor that a student updated their rating for their material.
+ */
+const notifyContributorOnRatingUpdated = async ({ material, student }) => {
+  try {
+    if (!material || !material.uploadedBy) return;
+
+    await Notification.create({
+      recipient: material.uploadedBy,
+      sender: student._id,
+      senderName: student.name,
+      title: 'Material Rating Updated',
+      message: `${student.name} updated their rating for your material “${material.title}”.`,
+      type: 'rating_updated',
+      materialId: material._id,
+      materialTitle: material.title,
+    });
+  } catch (err) {
+    console.error('[NotificationService] Failed to notify contributor on rating updated:', err.message);
+  }
+};
+
 module.exports = {
   notifyFacultyAdminOnUpload,
   notifyContributorOnApproval,
   notifyContributorOnRejection,
+  notifyStudentsOnMaterialApproval,
   notifySuperAdminOnNewAdmin,
   notifyAdminOnApproval,
   notifyAdminOnRejection,
   notifyFacultyAdminOnContributorRegistration,
   notifyContributorOnAccountApproval,
   notifyContributorOnAccountRejection,
+  notifyContributorOnRatingSubmitted,
+  notifyContributorOnRatingUpdated,
 };

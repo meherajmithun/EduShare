@@ -8,6 +8,7 @@ import 'package:edushare/core/services/api_client.dart';
 import 'package:edushare/models/department_model.dart';
 import 'package:edushare/models/course_model.dart';
 import 'package:edushare/models/material_model.dart';
+import 'package:edushare/models/material_rating_model.dart';
 import 'package:edushare/models/user_model.dart';
 import 'package:edushare/models/rating_model.dart';
 import 'package:edushare/models/contributor_profile_model.dart';
@@ -183,17 +184,24 @@ class FirestoreService {
   }
 
   /// Approve or reject a material.
-  /// [reason] is required when status = 'rejected' and is stored as rejectionReason.
+  /// [reason] is required when status = 'rejected'.
+  /// [reviewComment] is optional admin feedback visible to the contributor.
   Future<void> updateMaterialStatus(
     String materialId,
     String status, {
     String? reason,
+    String? reviewComment,
   }) async {
     if (status == 'approved') {
-      await _api.put('/api/admin/approve/$materialId', {});
+      await _api.put('/api/admin/approve/$materialId', {
+        if (reviewComment != null && reviewComment.trim().isNotEmpty)
+          'reviewComment': reviewComment.trim(),
+      });
     } else {
       await _api.put('/api/admin/reject/$materialId', {
         'reason': reason ?? 'No reason provided.',
+        if (reviewComment != null && reviewComment.trim().isNotEmpty)
+          'reviewComment': reviewComment.trim(),
       });
     }
   }
@@ -332,4 +340,147 @@ class FirestoreService {
   Future<void> deleteRating(String contributorId) async {
     await _api.delete('/api/contributors/$contributorId/ratings');
   }
+
+  // ─── Material Rating System ────────────────────────────────────────────
+
+  /// Fetch ratings for a specific material + current user's own rating.
+  Future<Map<String, dynamic>> getMaterialRatings(String materialId) async {
+    final data = await _api.get('/api/materials/$materialId/ratings') as Map<String, dynamic>;
+    final ratingsList = (data['ratings'] as List<dynamic>? ?? [])
+        .map((e) => MaterialRatingModel.fromJson(e as Map<String, dynamic>))
+        .toList();
+    final myRating = data['myRating'] != null
+        ? MaterialRatingModel.fromJson(data['myRating'] as Map<String, dynamic>)
+        : null;
+    return {
+      'ratings': ratingsList,
+      'myRating': myRating,
+      'avgRating': (data['avgRating'] as num?)?.toDouble() ?? 0.0,
+      'totalRatings': (data['totalRatings'] as num?)?.toInt() ?? 0,
+    };
+  }
+
+  /// Submit a new rating for a material (students only).
+  Future<MaterialRatingModel> addMaterialRating(
+    String materialId,
+    int stars, {
+    String? review,
+  }) async {
+    final data = await _api.post('/api/materials/$materialId/ratings', {
+      'stars': stars,
+      if (review != null && review.trim().isNotEmpty) 'review': review.trim(),
+    });
+    return MaterialRatingModel.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// Update the student's existing rating for a material.
+  Future<MaterialRatingModel> updateMaterialRating(
+    String materialId,
+    int stars, {
+    String? review,
+  }) async {
+    final data = await _api.put('/api/materials/$materialId/ratings', {
+      'stars': stars,
+      if (review != null) 'review': review.trim(),
+    });
+    return MaterialRatingModel.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// Delete the student's own rating for a material.
+  Future<void> deleteMaterialRating(String materialId) async {
+    await _api.delete('/api/materials/$materialId/ratings');
+  }
+
+  // ─── Video Learning System ─────────────────────────────────────────────
+
+  /// Increment video view counter
+  Future<void> incrementVideoView(String materialId) async {
+    try {
+      await _api.post('/api/videos/$materialId/view', {});
+    } catch (_) {}
+  }
+
+  /// Save video playback position & completion status
+  Future<void> saveVideoProgress({
+    required String materialId,
+    required String courseId,
+    required int lastPosition,
+    required int duration,
+    bool completed = false,
+  }) async {
+    try {
+      await _api.post('/api/videos/progress', {
+        'materialId': materialId,
+        'courseId': courseId,
+        'lastPosition': lastPosition,
+        'duration': duration,
+        'completed': completed,
+      });
+    } catch (_) {}
+  }
+
+  /// Fetch all video progress records for a course
+  Future<List<dynamic>> getCourseVideoProgress(String courseId) async {
+    try {
+      final data = await _api.get('/api/videos/progress/$courseId') as List<dynamic>;
+      return data;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Fetch continue watching items
+  Future<List<Map<String, dynamic>>> getContinueWatching() async {
+    try {
+      final data = await _api.get('/api/videos/continue-watching') as List<dynamic>;
+      return data.cast<Map<String, dynamic>>();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Fetch watch history
+  Future<List<Map<String, dynamic>>> getWatchHistory() async {
+    try {
+      final data = await _api.get('/api/videos/history') as List<dynamic>;
+      return data.cast<Map<String, dynamic>>();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Fetch bookmarked videos
+  Future<List<Map<String, dynamic>>> getBookmarks() async {
+    try {
+      final data = await _api.get('/api/videos/bookmarks') as List<dynamic>;
+      return data.cast<Map<String, dynamic>>();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Bookmark a video
+  Future<void> addBookmark(String materialId, String courseId) async {
+    await _api.post('/api/videos/bookmark/$materialId', {'courseId': courseId});
+  }
+
+  /// Remove bookmark
+  Future<void> removeBookmark(String materialId) async {
+    await _api.delete('/api/videos/bookmark/$materialId');
+  }
+
+  /// Fetch comments for a video
+  Future<List<dynamic>> getVideoComments(String materialId) async {
+    final data = await _api.get('/api/videos/$materialId/comments') as List<dynamic>;
+    return data;
+  }
+
+  /// Post a comment for a video
+  Future<Map<String, dynamic>> addVideoComment(String materialId, String comment) async {
+    final data = await _api.post('/api/videos/$materialId/comments', {
+      'comment': comment,
+    });
+    return data as Map<String, dynamic>;
+  }
 }
+

@@ -5,6 +5,10 @@ import 'package:edushare/core/services/firestore_service.dart';
 import 'package:edushare/core/services/auth_service.dart';
 import 'package:edushare/core/role_helper.dart';
 import 'package:edushare/models/user_model.dart';
+import 'package:edushare/views/admin/approvals_screen.dart';
+import 'package:edushare/views/admin/all_materials_screen.dart';
+import 'package:edushare/views/admin/users_screen.dart';
+import 'package:edushare/views/admin/faculty_admins_screen.dart';
 
 /// Admin Dashboard — stat cards showing totals, plus quick-action links.
 /// Works for all admin-class roles (admin, faculty_admin, super_admin).
@@ -30,6 +34,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   void initState() {
     super.initState();
     _loadStats();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Reload stats whenever this tab is revisited (live refresh)
+    if (!_isLoading) _loadStats();
   }
 
   Future<void> _loadStats() async {
@@ -97,9 +108,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               child: Text(
                 isSuperAdmin
                     ? 'Super Admin Dashboard'
-                    : isFacultyAdmin
-                        ? 'Faculty Dashboard'
-                        : 'Admin Dashboard',
+                    : 'Admin Dashboard',
                 style: theme.textTheme.titleLarge
                     ?.copyWith(fontWeight: FontWeight.bold),
                 overflow: TextOverflow.ellipsis,
@@ -269,14 +278,36 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       _quickAction(
                         context,
                         icon: Icons.admin_panel_settings_rounded,
-                        title: 'Review Faculty Admin Requests',
+                        title: 'Review Admin Requests',
                         subtitle:
                             '$_pendingFacultyAdmins pending approval${_pendingFacultyAdmins > 1 ? 's' : ''}',
                         color: const Color(0xFFF59E0B),
                         isDark: isDark,
-                        onTap: () {},
+                        onTap: () => Navigator.of(context)
+                            .push(MaterialPageRoute(
+                              builder: (_) => const FacultyAdminsScreen(),
+                            ))
+                            .then((_) => _loadStats()),
                       ),
                     if (isSuperAdmin && _pendingFacultyAdmins > 0)
+                      const SizedBox(height: 10),
+
+                    if (!isSuperAdmin && _pendingFacultyAdmins > 0)
+                      _quickAction(
+                        context,
+                        icon: Icons.person_add_rounded,
+                        title: 'Review Contributor Requests',
+                        subtitle:
+                            '$_pendingFacultyAdmins pending approval${_pendingFacultyAdmins > 1 ? 's' : ''}',
+                        color: const Color(0xFFF59E0B),
+                        isDark: isDark,
+                        onTap: () => Navigator.of(context)
+                            .push(MaterialPageRoute(
+                              builder: (_) => const ApprovalsScreen(),
+                            ))
+                            .then((_) => _loadStats()),
+                      ),
+                    if (!isSuperAdmin && _pendingFacultyAdmins > 0)
                       const SizedBox(height: 10),
 
                     _quickAction(
@@ -286,7 +317,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       subtitle: '$_pending materials awaiting approval',
                       color: const Color(0xFFF59E0B),
                       isDark: isDark,
-                      onTap: () {},
+                      onTap: () => Navigator.of(context)
+                          .push(MaterialPageRoute(
+                            builder: (_) => const ApprovalsScreen(),
+                          ))
+                          .then((_) => _loadStats()),
                     ),
                     const SizedBox(height: 10),
                     _quickAction(
@@ -296,8 +331,42 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       subtitle: '$_total total resources',
                       color: AppTheme.primaryColor,
                       isDark: isDark,
-                      onTap: () {},
+                      onTap: () => Navigator.of(context)
+                          .push(MaterialPageRoute(
+                            builder: (_) => const AllMaterialsScreen(),
+                          ))
+                          .then((_) => _loadStats()),
                     ),
+                    const SizedBox(height: 10),
+                    _quickAction(
+                      context,
+                      icon: Icons.people_rounded,
+                      title: isSuperAdmin ? 'Manage All Users' : 'Manage Users',
+                      subtitle: '$_totalUsers active users',
+                      color: const Color(0xFF8B5CF6),
+                      isDark: isDark,
+                      onTap: () => Navigator.of(context)
+                          .push(MaterialPageRoute(
+                            builder: (_) => const UsersScreen(),
+                          ))
+                          .then((_) => _loadStats()),
+                    ),
+                    if (isSuperAdmin) ...[
+                      const SizedBox(height: 10),
+                      _quickAction(
+                        context,
+                        icon: Icons.admin_panel_settings_outlined,
+                        title: 'Manage Admins',
+                        subtitle: 'View all Faculty Admins',
+                        color: const Color(0xFFEF4444),
+                        isDark: isDark,
+                        onTap: () => Navigator.of(context)
+                            .push(MaterialPageRoute(
+                              builder: (_) => const FacultyAdminsScreen(),
+                            ))
+                            .then((_) => _loadStats()),
+                      ),
+                    ],
                   ],
                 ),
               ),

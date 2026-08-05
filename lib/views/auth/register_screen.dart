@@ -24,6 +24,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _passwordController = TextEditingController();
   final _facultyIdController = TextEditingController();
   final _designationController = TextEditingController();
+  final _studentIdController = TextEditingController();
 
   String _selectedDepartment = 'Computer Science & Engineering';
   String? _selectedDepartmentId;
@@ -71,6 +72,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _passwordController.dispose();
     _facultyIdController.dispose();
     _designationController.dispose();
+    _studentIdController.dispose();
     super.dispose();
   }
 
@@ -130,6 +132,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         password: _passwordController.text,
         department: _selectedDepartment,
         role: _selectedRole,
+        studentId: _selectedRole == 'student' ? _studentIdController.text.trim() : null,
       );
 
       if (error != null) {
@@ -234,7 +237,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           ),
                           const SizedBox(height: 20),
 
-                          // ─── Email ─────────────────────────────────────
+                          // ─── Email ────────────────────────────────────────────
                           CustomTextField(
                             label: 'UNIVERSITY EMAIL',
                             hint: 'yourname@bubt.edu.bd',
@@ -244,6 +247,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             validator: AuthService.validateEmail,
                           ),
                           const SizedBox(height: 20),
+
+                          // ─── Student ID (students only) ───────────────────────
+                          if (_selectedRole == 'student') ...[
+                            CustomTextField(
+                              label: 'STUDENT ID',
+                              hint: 'e.g. 21234567890',
+                              controller: _studentIdController,
+                              keyboardType: TextInputType.text,
+                              prefixIcon: Icons.badge_outlined,
+                              validator: AuthService.validateStudentId,
+                            ),
+                            const SizedBox(height: 20),
+                          ],
 
                           // ─── Password ──────────────────────────────────
                           CustomTextField(

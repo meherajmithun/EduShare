@@ -35,6 +35,16 @@ const userSchema = new mongoose.Schema(
       trim: true,
       match: [/^\S+@\S+\.\S+$/, 'Please enter a valid email address'],
     },
+
+    // ─── Student ID (students only) ────────────────────────────────────────
+    // Sparse so that null values (non-student roles) don't violate the unique index.
+    studentId: {
+      type: String,
+      trim: true,
+      default: null,
+      sparse: true,
+    },
+
     password: {
       type: String,
       required: [true, 'Password is required'],
@@ -149,6 +159,7 @@ const userSchema = new mongoose.Schema(
         delete ret._id;
         delete ret.__v;
         delete ret.password;
+        // Keep studentId (may be null for non-student roles)
         return ret;
       },
     },

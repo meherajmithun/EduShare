@@ -21,6 +21,7 @@ const {
   notifyContributorOnRejection,
   notifyContributorOnAccountApproval,
   notifyContributorOnAccountRejection,
+  notifyStudentsOnMaterialApproval,
 } = require('../services/notificationService');
 const { success, createError } = require('../utils/apiResponse');
 
@@ -52,24 +53,32 @@ const approveMaterial = async (req, res) => {
     throw createError('This material is already approved.', 400);
   }
 
+  const reviewComment = (req.body.reviewComment && req.body.reviewComment.trim())
+    ? req.body.reviewComment.trim()
+    : null;
+
   material.approvalStatus = 'approved';
   material.status = 'approved';
   material.approvedBy = req.user._id;
   material.approvedByName = req.user.name;
   material.approvedAt = new Date();
   material.rejectionReason = null;
+  material.reviewComment = reviewComment;
 
   await material.save();
 
-  // ── Notify the contributor (fire-and-forget) ───────────────────────────
+  // ── Notify contributor (fire-and-forget) ──────────────────────────────
   notifyContributorOnApproval({ material, admin: req.user });
+
+  // ── Notify all students in this department (fire-and-forget) ──────────
+  notifyStudentsOnMaterialApproval({ material });
 
   res.json(success(material.toJSON(), 'Material approved successfully.'));
 };
 
 // ─── PUT /api/admin/reject/:id ─────────────────────────────────────────
 const rejectMaterial = async (req, res) => {
-  const { reason } = req.body;
+  const { reason, reviewComment } = req.body;
 
   const material = await Material.findById(req.params.id);
   if (!material) throw createError('Material not found.', 404);
@@ -86,6 +95,9 @@ const rejectMaterial = async (req, res) => {
   }
 
   const rejectionReason = reason && reason.trim() ? reason.trim() : 'No reason provided.';
+  const adminReviewComment = (reviewComment && reviewComment.trim())
+    ? reviewComment.trim()
+    : null;
 
   material.approvalStatus = 'rejected';
   material.status = 'rejected';
@@ -93,6 +105,7 @@ const rejectMaterial = async (req, res) => {
   material.approvedByName = req.user.name;
   material.approvedAt = new Date();
   material.rejectionReason = rejectionReason;
+  material.reviewComment = adminReviewComment;
 
   await material.save();
 

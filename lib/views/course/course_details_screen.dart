@@ -7,7 +7,9 @@ import 'package:edushare/models/course_model.dart';
 import 'package:edushare/models/material_model.dart';
 import 'package:edushare/models/contributor_profile_model.dart';
 import 'package:edushare/views/profile/contributor_profile_screen.dart';
+import 'package:edushare/views/course/video_details_screen.dart';
 import 'package:edushare/widgets/glass_card.dart';
+import 'package:edushare/widgets/material_rating_sheet.dart';
 
 class CourseDetailsScreen extends StatefulWidget {
   final CourseModel course;
@@ -353,34 +355,91 @@ class _CourseDetailsScreenState extends State<CourseDetailsScreen> with SingleTi
                       ),
                     ),
 
-                    // Open / Play Button
-                    ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                        backgroundColor: isVideo ? Colors.redAccent : AppTheme.primaryColor,
-                      ),
-                      onPressed: () {
-                        if (isVideo && mat.videoLink != null) {
-                          _playYoutubeVideo(mat.videoLink!);
-                        } else {
-                          _openUrl(mat.fileUrl);
-                        }
-                      },
-                      child: Row(
-                        children: [
-                          Icon(
-                            isVideo ? Icons.play_arrow_rounded : Icons.open_in_new_rounded,
-                            size: 16,
-                            color: Colors.white,
+                    // Action Buttons Row: Rate & Open/Play
+                    Row(
+                      children: [
+                        // Material Rating Button
+                        InkWell(
+                          borderRadius: BorderRadius.circular(10),
+                          onTap: () {
+                            MaterialRatingSheet.show(
+                              context,
+                              mat,
+                              onRatingChanged: _loadMaterials,
+                            );
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: Colors.amber.withOpacity(0.12),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: Colors.amber.withOpacity(0.4)),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.star_rounded, color: Colors.amber, size: 16),
+                                const SizedBox(width: 4),
+                                Text(
+                                  mat.avgRating > 0 ? mat.avgRating.toStringAsFixed(1) : 'Rate',
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.amber,
+                                  ),
+                                ),
+                                if (mat.totalRatings > 0)
+                                  Text(
+                                    ' (${mat.totalRatings})',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      color: theme.disabledColor,
+                                    ),
+                                  ),
+                              ],
+                            ),
                           ),
-                          const SizedBox(width: 4),
-                          Text(
-                            isVideo ? 'Play' : 'Open',
-                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white),
+                        ),
+                        const SizedBox(width: 8),
+
+                        // Open / Play Button
+                        ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            backgroundColor: isVideo ? Colors.redAccent : AppTheme.primaryColor,
                           ),
-                        ],
-                      ),
+                          onPressed: () {
+                            if (isVideo) {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => VideoDetailsScreen(
+                                    course: widget.course,
+                                    allCourseVideos: _videos,
+                                    initialVideo: mat,
+                                    courseResources: [..._notes, ..._assignments],
+                                  ),
+                                ),
+                              );
+                            } else {
+                              _openUrl(mat.fileUrl);
+                            }
+                          },
+                          child: Row(
+                            children: [
+                              Icon(
+                                isVideo ? Icons.play_arrow_rounded : Icons.open_in_new_rounded,
+                                size: 16,
+                                color: Colors.white,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                isVideo ? 'Watch' : 'Open',
+                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),

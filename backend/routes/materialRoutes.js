@@ -6,6 +6,10 @@ const {
   getMaterialById,
   createMaterial,
   deleteMaterial,
+  getMaterialRatings,
+  addMaterialRating,
+  updateMaterialRating,
+  deleteMaterialRating,
 } = require('../controllers/materialController');
 const { protect } = require('../middleware/auth');
 const roleGuard = require('../middleware/roleGuard');
@@ -21,7 +25,7 @@ router.get(
 router.get('/', protect, getMaterials);          // ?courseId=&type=
 router.get('/:id', protect, getMaterialById);
 
-// upload.single('file') runs multer → streams file to Cloudinary before controller
+// upload.single('file') runs multer -> streams file to Cloudinary before controller
 router.post(
   '/',
   protect,
@@ -36,5 +40,11 @@ router.delete(
   roleGuard('contributor', 'admin', 'faculty_admin', 'super_admin'),
   deleteMaterial
 );
+
+// Material ratings (students submit; all authenticated users can read)
+router.get('/:id/ratings', protect, getMaterialRatings);
+router.post('/:id/ratings', protect, roleGuard('student'), addMaterialRating);
+router.put('/:id/ratings', protect, roleGuard('student'), updateMaterialRating);
+router.delete('/:id/ratings', protect, roleGuard('student'), deleteMaterialRating);
 
 module.exports = router;

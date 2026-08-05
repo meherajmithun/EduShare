@@ -1,15 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:edushare/core/providers/theme_provider.dart';
+import 'package:edushare/core/services/auth_service.dart';
 import 'package:edushare/core/theme.dart';
 
-/// Settings screen — Appearance / Theme selection.
-class SettingsScreen extends StatelessWidget {
+/// Settings screen — Appearance / Theme + Account Security settings.
+class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
   @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final authService = context.watch<AuthService>();
+
     return Scaffold(
       appBar: AppBar(
         title: Text(
@@ -29,6 +38,78 @@ class SettingsScreen extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           const _ThemeCard(),
+
+          // ─── Account Security (only when biometrics are available) ────────
+          if (authService.biometricsAvailable) ...[
+            const SizedBox(height: 24),
+            Text(
+              'Account Security',
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: AppTheme.primaryColor,
+                letterSpacing: 0.8,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Container(
+              decoration: BoxDecoration(
+                color: isDark ? AppTheme.darkCard : AppTheme.lightCard,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
+                ),
+              ),
+              child: SwitchListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                title: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: authService.quickLoginEnabled
+                            ? AppTheme.primaryColor.withOpacity(0.15)
+                            : (isDark ? AppTheme.darkSurface : AppTheme.lightSurface),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(
+                        Icons.fingerprint_rounded,
+                        size: 20,
+                        color: authService.quickLoginEnabled
+                            ? AppTheme.primaryColor
+                            : theme.disabledColor,
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Quick Login',
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 15,
+                            ),
+                          ),
+                          Text(
+                            'Sign in with fingerprint or face ID',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              fontSize: 12,
+                              color: isDark
+                                  ? AppTheme.darkTextSecondary
+                                  : AppTheme.lightTextSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                value: authService.quickLoginEnabled,
+                activeColor: AppTheme.primaryColor,
+                onChanged: (val) => authService.setQuickLoginEnabled(val),
+              ),
+            ),
+          ],
         ],
       ),
     );

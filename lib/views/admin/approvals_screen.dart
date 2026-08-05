@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:edushare/core/theme.dart';
 import 'package:edushare/core/services/firestore_service.dart';
 import 'package:edushare/core/services/auth_service.dart';
@@ -73,12 +74,39 @@ class _ApprovalsScreenState extends State<ApprovalsScreen>
     }
   }
 
+  // ── Preview Helper ─────────────────────────────────────────────────────
+
+  Future<void> _previewMaterial(MaterialModel mat) async {
+    final urlStr = mat.type == 'video' ? mat.videoLink : mat.fileUrl;
+    if (urlStr == null || urlStr.trim().isEmpty) {
+      _showSnack('No link or file available to preview.', const Color(0xFFEF4444));
+      return;
+    }
+
+    final uri = Uri.parse(urlStr.trim());
+    try {
+      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!launched) {
+        _showSnack('Could not open preview in browser.', const Color(0xFFEF4444));
+      }
+    } catch (e) {
+      _showSnack('Failed to launch preview: $e', const Color(0xFFEF4444));
+    }
+  }
+
   // ── Material Actions ───────────────────────────────────────────────────
 
   Future<void> _approveMaterial(MaterialModel mat) async {
+    final reviewComment = await _showApproveDialog(mat.title);
+    if (reviewComment == null) return; // User cancelled
+
     setState(() => _processingIds.add(mat.id));
     try {
-      await _service.updateMaterialStatus(mat.id, 'approved');
+      await _service.updateMaterialStatus(
+        mat.id,
+        'approved',
+        reviewComment: reviewComment,
+      );
       if (mounted) {
         setState(() {
           _pendingMaterials.removeWhere((m) => m.id == mat.id);
@@ -95,12 +123,17 @@ class _ApprovalsScreenState extends State<ApprovalsScreen>
   }
 
   Future<void> _rejectMaterial(MaterialModel mat) async {
-    final reason = await _showRejectDialog('Material', mat.title);
-    if (reason == null) return;
+    final result = await _showRejectDialog('Material', mat.title);
+    if (result == null) return;
 
     setState(() => _processingIds.add(mat.id));
     try {
-      await _service.updateMaterialStatus(mat.id, 'rejected', reason: reason);
+      await _service.updateMaterialStatus(
+        mat.id,
+        'rejected',
+        reason: result['reason'],
+        reviewComment: result['reviewComment'],
+      );
       if (mounted) {
         setState(() {
           _pendingMaterials.removeWhere((m) => m.id == mat.id);
@@ -138,12 +171,12 @@ class _ApprovalsScreenState extends State<ApprovalsScreen>
   }
 
   Future<void> _rejectContributor(UserModel user) async {
-    final reason = await _showRejectDialog('Contributor', user.name);
-    if (reason == null) return;
+    final result = await _showRejectDialog('Contributor', user.name);
+    if (result == null) return;
 
     setState(() => _processingIds.add(user.uid));
     try {
-      await _service.rejectContributor(user.uid, reason: reason);
+      await _service.rejectContributor(user.uid, reason: result['reason']);
       if (mounted) {
         setState(() {
           _pendingContributors.removeWhere((u) => u.uid == user.uid);
@@ -159,11 +192,67 @@ class _ApprovalsScreenState extends State<ApprovalsScreen>
     }
   }
 
+  // ── Approve Dialog ────────────────────────────────────────────────────
+
+  Future<String?> _showApproveDialog(String title) async {
+    final commentCtrl = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: const [
+            Icon(Icons.check_circle_outline_rounded, color: Color(0xFF10B981), size: 22),
+            SizedBox(width: 8),
+            Text('Approve Material', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '"$title"',
+              style: TextStyle(fontStyle: FontStyle.italic, fontSize: 13, color: Theme.of(ctx).disabledColor),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: commentCtrl,
+              maxLines: 2,
+              maxLength: 300,
+              decoration: InputDecoration(
+                hintText: 'Add an optional review comment for the contributor…',
+                hintStyle: const TextStyle(fontSize: 13),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                contentPadding: const EdgeInsets.all(12),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, null),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF10B981),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () => Navigator.pop(ctx, commentCtrl.text.trim()),
+            child: const Text('Approve', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
   // ── Rejection Dialog ──────────────────────────────────────────────────
 
-  Future<String?> _showRejectDialog(String type, String nameOrTitle) async {
-    final controller = TextEditingController();
-    return showDialog<String>(
+  Future<Map<String, String>?> _showRejectDialog(String type, String nameOrTitle) async {
+    final reasonCtrl = TextEditingController();
+    final commentCtrl = TextEditingController();
+    return showDialog<Map<String, String>>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Row(
@@ -174,36 +263,55 @@ class _ApprovalsScreenState extends State<ApprovalsScreen>
                 style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
           ],
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '"$nameOrTitle"',
-              style: TextStyle(
-                  fontStyle: FontStyle.italic,
-                  fontSize: 13,
-                  color: Theme.of(ctx).disabledColor),
-            ),
-            const SizedBox(height: 14),
-            TextField(
-              controller: controller,
-              maxLines: 3,
-              maxLength: 300,
-              autofocus: true,
-              decoration: InputDecoration(
-                hintText: 'Enter rejection reason (optional)…',
-                hintStyle: const TextStyle(fontSize: 13),
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12)),
-                contentPadding: const EdgeInsets.all(12),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '"$nameOrTitle"',
+                style: TextStyle(
+                    fontStyle: FontStyle.italic,
+                    fontSize: 13,
+                    color: Theme.of(ctx).disabledColor),
               ),
-            ),
-          ],
+              const SizedBox(height: 14),
+              TextField(
+                controller: reasonCtrl,
+                maxLines: 2,
+                maxLength: 300,
+                autofocus: true,
+                decoration: InputDecoration(
+                  labelText: 'Rejection Reason *',
+                  hintText: 'Why is this being rejected?',
+                  hintStyle: const TextStyle(fontSize: 13),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                  contentPadding: const EdgeInsets.all(12),
+                ),
+              ),
+              if (type == 'Material') ...[
+                const SizedBox(height: 10),
+                TextField(
+                  controller: commentCtrl,
+                  maxLines: 2,
+                  maxLength: 300,
+                  decoration: InputDecoration(
+                    labelText: 'Review Comment (Optional)',
+                    hintText: 'Additional feedback for contributor…',
+                    hintStyle: const TextStyle(fontSize: 13),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                    contentPadding: const EdgeInsets.all(12),
+                  ),
+                ),
+              ],
+            ],
+          ),
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx),
+            onPressed: () => Navigator.pop(ctx, null),
             child: const Text('Cancel'),
           ),
           ElevatedButton(
@@ -214,12 +322,12 @@ class _ApprovalsScreenState extends State<ApprovalsScreen>
                   borderRadius: BorderRadius.circular(10)),
             ),
             onPressed: () {
-              Navigator.pop(
-                ctx,
-                controller.text.trim().isNotEmpty
-                    ? controller.text.trim()
+              Navigator.pop(ctx, {
+                'reason': reasonCtrl.text.trim().isNotEmpty
+                    ? reasonCtrl.text.trim()
                     : 'No reason provided.',
-              );
+                'reviewComment': commentCtrl.text.trim(),
+              });
             },
             child: const Text('Reject',
                 style: TextStyle(fontWeight: FontWeight.bold)),
@@ -314,6 +422,7 @@ class _ApprovalsScreenState extends State<ApprovalsScreen>
                                 mat: mat,
                                 theme: theme,
                                 isProcessing: isProcessing,
+                                onPreview: () => _previewMaterial(mat),
                                 onApprove: () => _approveMaterial(mat),
                                 onReject: () => _rejectMaterial(mat),
                               ),
@@ -392,6 +501,7 @@ class _PendingMaterialCard extends StatelessWidget {
   final MaterialModel mat;
   final ThemeData theme;
   final bool isProcessing;
+  final VoidCallback onPreview;
   final VoidCallback onApprove;
   final VoidCallback onReject;
 
@@ -399,6 +509,7 @@ class _PendingMaterialCard extends StatelessWidget {
     required this.mat,
     required this.theme,
     required this.isProcessing,
+    required this.onPreview,
     required this.onApprove,
     required this.onReject,
   });
@@ -509,6 +620,22 @@ class _PendingMaterialCard extends StatelessWidget {
           else
             Row(
               children: [
+                // Preview Button
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppTheme.primaryColor,
+                    side: const BorderSide(color: AppTheme.primaryColor),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                  ),
+                  icon: const Icon(Icons.visibility_outlined, size: 16),
+                  label: const Text('Preview',
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 12)),
+                  onPressed: onPreview,
+                ),
+                const SizedBox(width: 8),
                 Expanded(
                   child: OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(
@@ -521,11 +648,11 @@ class _PendingMaterialCard extends StatelessWidget {
                     icon: const Icon(Icons.close_rounded, size: 16),
                     label: const Text('Reject',
                         style: TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 13)),
+                            fontWeight: FontWeight.bold, fontSize: 12)),
                     onPressed: onReject,
                   ),
                 ),
-                const SizedBox(width: 10),
+                const SizedBox(width: 8),
                 Expanded(
                   child: ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
@@ -538,7 +665,7 @@ class _PendingMaterialCard extends StatelessWidget {
                     icon: const Icon(Icons.check_rounded, size: 16),
                     label: const Text('Approve',
                         style: TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 13)),
+                            fontWeight: FontWeight.bold, fontSize: 12)),
                     onPressed: onApprove,
                   ),
                 ),
@@ -569,10 +696,6 @@ class _PendingContributorCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final initials = user.name.isNotEmpty
-        ? user.name.trim().split(' ').map((w) => w[0]).take(2).join().toUpperCase()
-        : '?';
-
     return GlassCard(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -582,13 +705,13 @@ class _PendingContributorCard extends StatelessWidget {
             children: [
               CircleAvatar(
                 radius: 20,
-                backgroundColor: AppTheme.primaryColor.withOpacity(0.15),
+                backgroundColor: AppTheme.accentColor.withOpacity(0.2),
                 child: Text(
-                  initials,
+                  user.name.isNotEmpty ? user.name[0].toUpperCase() : 'C',
                   style: const TextStyle(
-                      color: AppTheme.primaryColor,
+                      color: AppTheme.accentColor,
                       fontWeight: FontWeight.bold,
-                      fontSize: 13),
+                      fontSize: 16),
                 ),
               ),
               const SizedBox(width: 12),
@@ -598,27 +721,30 @@ class _PendingContributorCard extends StatelessWidget {
                   children: [
                     Text(user.name,
                         style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.bold, fontSize: 14)),
+                            fontWeight: FontWeight.bold, fontSize: 15)),
                     const SizedBox(height: 2),
                     Text(user.email,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                            fontSize: 11, color: theme.disabledColor)),
+                        style: theme.textTheme.bodyMedium
+                            ?.copyWith(fontSize: 12)),
                   ],
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Icon(Icons.school_outlined, size: 14, color: theme.disabledColor),
-              const SizedBox(width: 6),
-              Text(
-                user.department.isNotEmpty ? user.department : 'Unspecified Department',
-                style: theme.textTheme.bodyMedium?.copyWith(fontSize: 12),
-              ),
-            ],
-          ),
+          if (user.department != null && user.department!.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Icon(Icons.school_outlined,
+                    size: 14, color: theme.disabledColor),
+                const SizedBox(width: 6),
+                Text(
+                  'Dept: ${user.department}',
+                  style: theme.textTheme.bodyMedium?.copyWith(fontSize: 12),
+                ),
+              ],
+            ),
+          ],
           const SizedBox(height: 14),
           if (isProcessing)
             const Center(

@@ -10,6 +10,7 @@ import 'package:edushare/core/role_helper.dart';
 import 'package:edushare/widgets/glass_card.dart';
 import 'package:edushare/widgets/notification_bell.dart';
 import 'package:edushare/views/course/course_details_screen.dart';
+import 'package:edushare/views/course/watch_history_screen.dart';
 import 'package:edushare/views/upload/upload_resource_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -124,7 +125,18 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ],
         ),
-        actions: const [NotificationBell()],
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.video_library_rounded),
+            tooltip: 'Video Library',
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const WatchHistoryScreen()),
+              );
+            },
+          ),
+          const NotificationBell(),
+        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
@@ -161,7 +173,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                   child: Text(
-                    currentUser?.role.toUpperCase() ?? 'STUDENT',
+                    currentUser?.roleLabel.toUpperCase() ?? 'STUDENT',
                     style: TextStyle(
                       color: _getRoleColor(currentUser?.role),
                       fontSize: 11,
@@ -175,7 +187,7 @@ class _HomeScreenState extends State<HomeScreen> {
             const SizedBox(height: 24),
 
             // Quick Info / Upload Banner for Contributors / Admins
-            if (currentUser?.role == 'contributor' || currentUser?.role == 'admin') ...[
+            if (currentUser?.role == 'contributor') ...[
               GlassCard(
                 color: AppTheme.primaryColor.withOpacity(0.1),
                 border: const BorderSide(color: AppTheme.primaryColor, width: 1.5),
@@ -416,7 +428,10 @@ class _HomeScreenState extends State<HomeScreen> {
   static Color _getRoleColor(String? role) {
     switch (role) {
       case 'admin':
+      case 'faculty_admin':
         return const Color(0xFFEF4444);
+      case 'super_admin':
+        return const Color(0xFF8B5CF6);
       case 'contributor':
         return const Color(0xFF10B981);
       default:

@@ -471,7 +471,7 @@ class _UploadCard extends StatelessWidget {
             ),
           ],
 
-          // ── Approved: show who approved + date ──────────────────────
+          // ── Approved: show who approved + date + review comment ───────
           if (mat.approvalStatus == 'approved' &&
               mat.approvedByName != null) ...[
             const SizedBox(height: 8),
@@ -483,23 +483,38 @@ class _UploadCard extends StatelessWidget {
                 border: Border.all(
                     color: const Color(0xFF10B981).withOpacity(0.35)),
               ),
-              child: Row(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Icon(Icons.verified_outlined,
-                      size: 14, color: Color(0xFF10B981)),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      'Approved by ${mat.approvedByName}' +
-                          (mat.approvedAt != null
-                              ? ' · ${_formatDate(mat.approvedAt!)}'
-                              : ''),
-                      style: const TextStyle(
-                          color: Color(0xFF10B981),
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600),
-                    ),
+                  Row(
+                    children: [
+                      const Icon(Icons.verified_outlined,
+                          size: 14, color: Color(0xFF10B981)),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'Approved by ${mat.approvedByName}' +
+                              (mat.approvedAt != null
+                                  ? ' · ${_formatDate(mat.approvedAt!)}'
+                                  : ''),
+                          style: const TextStyle(
+                              color: Color(0xFF10B981),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ],
                   ),
+                  if (mat.reviewComment != null && mat.reviewComment!.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      'Comment: "${mat.reviewComment}"',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                          fontSize: 12,
+                          fontStyle: FontStyle.italic,
+                          color: const Color(0xFF10B981).withOpacity(0.9)),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -537,9 +552,20 @@ class _UploadCard extends StatelessWidget {
                       mat.rejectionReason!.isNotEmpty) ...[
                     const SizedBox(height: 6),
                     Text(
-                      '${mat.rejectionReason}',
+                      'Reason: ${mat.rejectionReason}',
                       style: theme.textTheme.bodyMedium?.copyWith(
                           fontSize: 12,
+                          color: const Color(0xFFEF4444).withOpacity(0.8)),
+                    ),
+                  ],
+                  if (mat.reviewComment != null &&
+                      mat.reviewComment!.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      'Comment: "${mat.reviewComment}"',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                          fontSize: 12,
+                          fontStyle: FontStyle.italic,
                           color: const Color(0xFFEF4444).withOpacity(0.8)),
                     ),
                   ],

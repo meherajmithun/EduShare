@@ -10,6 +10,7 @@ class UserModel {
   final String status;        // 'active' | 'pending' | 'disabled'
   final String department;
   final String? departmentId;
+  final String? studentId;    // Students only — used for alternative login
   final String? facultyId;
   final String? designation;
   final String? bio;
@@ -26,6 +27,7 @@ class UserModel {
     required this.department,
     this.status = 'active',
     this.departmentId,
+    this.studentId,
     this.facultyId,
     this.designation,
     this.bio,
@@ -43,6 +45,7 @@ class UserModel {
     String? department,
     String? status,
     String? departmentId,
+    String? studentId,
     String? facultyId,
     String? designation,
     String? bio,
@@ -59,6 +62,7 @@ class UserModel {
       department: department ?? this.department,
       status: status ?? this.status,
       departmentId: departmentId ?? this.departmentId,
+      studentId: studentId ?? this.studentId,
       facultyId: facultyId ?? this.facultyId,
       designation: designation ?? this.designation,
       bio: bio ?? this.bio,
@@ -80,6 +84,7 @@ class UserModel {
       status: json['status'] as String? ?? 'active',
       department: json['department'] as String? ?? '',
       departmentId: json['departmentId']?.toString(),
+      studentId: json['studentId'] as String?,
       facultyId: json['facultyId'] as String?,
       designation: json['designation'] as String?,
       bio: json['bio'] as String?,
@@ -101,6 +106,7 @@ class UserModel {
       'status': status,
       'department': department,
       if (departmentId != null) 'departmentId': departmentId,
+      if (studentId != null) 'studentId': studentId,
       if (facultyId != null) 'facultyId': facultyId,
       if (designation != null) 'designation': designation,
       if (bio != null) 'bio': bio,

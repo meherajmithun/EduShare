@@ -47,7 +47,7 @@ const SELF_REGISTER_ROLES = ['student', 'contributor', 'admin', 'faculty_admin']
 //   status = 'pending' → no JWT issued → Super Admin notified.
 //   Student workflow: status = 'active' → JWT issued immediately.
 const register = async (req, res) => {
-  const { name, email, password, role, department, facultyId, designation } = req.body;
+  const { name, email, password, role, department, facultyId, designation, studentId } = req.body;
 
   if (!name || !email || !password || !role || !department) {
     throw createError('All fields are required: name, email, password, role, department.', 400);
@@ -72,6 +72,14 @@ const register = async (req, res) => {
   const existing = await User.findOne({ email: email.toLowerCase().trim() });
   if (existing) {
     throw createError('An account with this email already exists. Please log in instead.', 409);
+  }
+
+  // Student ID uniqueness check (students only)
+  if (role === 'student' && studentId && studentId.trim()) {
+    const existingStudentId = await User.findOne({ studentId: studentId.trim() });
+    if (existingStudentId) {
+      throw createError('This Student ID is already registered. Please check your ID or log in.', 409);
+    }
   }
 
   // ── Contributor → pending approval ──────────────────────────────────────
@@ -157,6 +165,8 @@ const register = async (req, res) => {
     department: department.trim(),
     departmentId: studentDeptId,
     status: 'active',
+    // Save Student ID if provided (students only)
+    studentId: (role === 'student' && studentId && studentId.trim()) ? studentId.trim() : null,
   });
   const token = signToken(user._id);
 
@@ -223,16 +233,21 @@ const registerFacultyAdmin = async (req, res) => {
   );
 };
 
-// ─── GET /api/auth/account-status?email= ──────────────────────────────
+// ─── GET /api/auth/account-status?email=  OR  ?studentId= ────────────
 const getAccountStatus = async (req, res) => {
-  const { email } = req.query;
-  if (!email || !email.trim()) {
-    throw createError('Email parameter is required.', 400);
+  const { email, studentId } = req.query;
+  if ((!email || !email.trim()) && (!studentId || !studentId.trim())) {
+    throw createError('Either email or studentId parameter is required.', 400);
   }
 
-  const user = await User.findOne({ email: email.toLowerCase().trim() });
+  let user;
+  if (studentId && studentId.trim()) {
+    user = await User.findOne({ studentId: studentId.trim() });
+  } else {
+    user = await User.findOne({ email: email.toLowerCase().trim() });
+  }
   if (!user) {
-    throw createError('No account found with this email address.', 404);
+    throw createError('No account found with this identifier.', 404);
   }
 
   let message = 'Account is active.';
@@ -263,11 +278,15 @@ const getAccountStatus = async (req, res) => {
 };
 
 // ─── POST /api/auth/login ─────────────────────────────────────────────
+//
+// Accepts either:
+//   { email, password, role }    — standard login for all roles
+//   { studentId, password, role } — student-only alternative login
 const login = async (req, res) => {
-  const { email, password, role } = req.body;
+  const { email, studentId, password, role } = req.body;
 
-  if (!email || !password || !role) {
-    throw createError('Email, password, and role are required.', 400);
+  if ((!email && !studentId) || !password || !role) {
+    throw createError('Identifier (email or student ID), password, and role are required.', 400);
   }
 
   const validRoles = ['student', 'contributor', 'admin', 'faculty_admin', 'super_admin'];
@@ -275,10 +294,24 @@ const login = async (req, res) => {
     throw createError('Invalid role selected.', 400);
   }
 
-  const user = await User.findOne({ email: email.toLowerCase().trim() }).select('+password');
+  // Student ID login only allowed for student role
+  if (studentId && role !== 'student') {
+    throw createError('Student ID login is only available for students.', 400);
+  }
 
-  if (!user) {
-    throw createError('Invalid credentials. Please check your email and password.', 401);
+  let user;
+  if (studentId && studentId.trim()) {
+    // Look up by studentId
+    user = await User.findOne({ studentId: studentId.trim() }).select('+password');
+    if (!user) {
+      throw createError('Invalid credentials. Please check your Student ID and password.', 401);
+    }
+  } else {
+    // Look up by email (standard path)
+    user = await User.findOne({ email: email.toLowerCase().trim() }).select('+password');
+    if (!user) {
+      throw createError('Invalid credentials. Please check your email and password.', 401);
+    }
   }
 
   const passwordMatch = await user.comparePassword(password);
@@ -298,39 +331,50 @@ const login = async (req, res) => {
     }
   }
 
-  // Status check — block pending, rejected, and disabled accounts
+  // Status check — return structured response for pending/rejected (not a crash)
   if (user.status === 'pending') {
-    if (user.role === 'contributor') {
-      throw createError(
-        'Your contributor account is pending Faculty Admin approval. You will be notified once approved.',
-        403
-      );
-    }
-    throw createError(
-      'Your Admin application is still under review.',
-      403
-    );
+    const msg = (user.role === 'contributor')
+      ? 'Your contributor account is pending Faculty Admin approval. You will be notified once approved.'
+      : 'Your Admin application is still under review by the Super Admin.';
+    return res.status(403).json({
+      success: false,
+      statusBlocked: true,
+      accountStatus: 'pending',
+      role: user.role,
+      name: user.name,
+      email: user.email,
+      department: user.department,
+      rejectionReason: null,
+      message: msg,
+    });
   }
 
   if (user.status === 'rejected') {
-    const reason = user.rejectionReason || 'No reason provided.';
-    if (user.role === 'contributor') {
-      throw createError(
-        `Your contributor registration was rejected. Reason: ${reason}`,
-        403
-      );
-    }
-    throw createError(
-      `Your Admin application was rejected. Reason: ${reason}`,
-      403
-    );
+    const reason = user.rejectionReason || 'No specific reason provided.';
+    const msg = (user.role === 'contributor')
+      ? `Your contributor registration was rejected. Reason: ${reason}`
+      : `Your Admin application was rejected. Reason: ${reason}`;
+    return res.status(403).json({
+      success: false,
+      statusBlocked: true,
+      accountStatus: 'rejected',
+      role: user.role,
+      name: user.name,
+      email: user.email,
+      department: user.department,
+      rejectionReason: reason,
+      message: msg,
+    });
   }
 
   if (user.status === 'disabled') {
-    throw createError(
-      'Your account has been disabled. Please contact support.',
-      403
-    );
+    return res.status(403).json({
+      success: false,
+      statusBlocked: true,
+      accountStatus: 'disabled',
+      role: user.role,
+      message: 'Your account has been disabled. Please contact support.',
+    });
   }
 
   if (!user.isActive) {

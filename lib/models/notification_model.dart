@@ -63,7 +63,10 @@ class NotificationModel {
     );
   }
 
-  bool get isApproval => type == 'material_approved';
-  bool get isRejection => type == 'material_rejected';
+  bool get isApproval => type == 'material_approved' || type == 'admin_approved' || type == 'contributor_approved';
+  bool get isRejection => type == 'material_rejected' || type == 'admin_rejected' || type == 'contributor_rejected';
   bool get isAssignment => type == 'upload_assigned';
+  bool get isPublished => type == 'material_published';
+  bool get isRating => type == 'rating_submitted' || type == 'rating_updated';
+  bool get isRegistration => type == 'admin_registered' || type == 'contributor_registered';
 }

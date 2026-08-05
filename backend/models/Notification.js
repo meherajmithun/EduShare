@@ -5,12 +5,15 @@
  *   upload_assigned          — Admin receives this when a contributor uploads to their department
  *   material_approved        — Contributor receives this when their material is approved
  *   material_rejected        — Contributor receives this when their material is rejected
+ *   material_published       — Students receive this when a new material is approved in their dept
  *   admin_registered         — Super Admin receives this when a new Admin registers (pending)
  *   admin_approved           — Admin receives this when Super Admin approves their account
  *   admin_rejected           — Admin receives this when Super Admin rejects their account
  *   contributor_registered   — Faculty Admin notified when a contributor registers for their dept
  *   contributor_approved     — Contributor notified when Faculty Admin approves their account
  *   contributor_rejected     — Contributor notified when Faculty Admin rejects their account
+ *   rating_submitted         — Contributor notified when a student submits a material rating
+ *   rating_updated           — Contributor notified when a student updates their material rating
  */
 
 const mongoose = require('mongoose');
@@ -61,12 +64,15 @@ const notificationSchema = new mongoose.Schema(
           'upload_assigned',
           'material_approved',
           'material_rejected',
+          'material_published',
           'admin_registered',
           'admin_approved',
           'admin_rejected',
           'contributor_registered',
           'contributor_approved',
           'contributor_rejected',
+          'rating_submitted',
+          'rating_updated',
         ],
         message: 'Invalid notification type',
       },

@@ -37,6 +37,16 @@ class MaterialModel {
   /// Populated when approvalStatus == 'rejected'
   final String? rejectionReason;
 
+  /// Admin review comment — visible to contributor after approve or reject
+  final String? reviewComment;
+
+  /// Per-material rating stats (rolled up to contributor avgRating)
+  final double avgRating;
+  final int totalRatings;
+
+  /// View count
+  final int views;
+
   final DateTime createdAt;
 
   const MaterialModel({
@@ -59,6 +69,10 @@ class MaterialModel {
     this.approvedByName,
     this.approvedAt,
     this.rejectionReason,
+    this.reviewComment,
+    this.avgRating = 0.0,
+    this.totalRatings = 0,
+    this.views = 0,
     required this.createdAt,
   });
 
@@ -92,6 +106,10 @@ class MaterialModel {
           ? DateTime.tryParse(json['approvedAt'].toString())
           : null,
       rejectionReason: json['rejectionReason'] as String?,
+      reviewComment: json['reviewComment'] as String?,
+      avgRating: (json['avgRating'] as num?)?.toDouble() ?? 0.0,
+      totalRatings: (json['totalRatings'] as num?)?.toInt() ?? 0,
+      views: (json['views'] as num?)?.toInt() ?? 0,
 
       createdAt: json['createdAt'] != null
           ? DateTime.tryParse(json['createdAt'].toString()) ?? DateTime.now()
@@ -120,6 +138,10 @@ class MaterialModel {
       'approvedByName': approvedByName,
       'approvedAt': approvedAt?.toIso8601String(),
       'rejectionReason': rejectionReason,
+      'reviewComment': reviewComment,
+      'avgRating': avgRating,
+      'totalRatings': totalRatings,
+      'views': views,
       'createdAt': createdAt.toIso8601String(),
     };
   }

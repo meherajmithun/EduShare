@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:edushare/core/theme.dart';
 import 'package:edushare/core/services/auth_service.dart';
+import 'package:edushare/core/services/session_service.dart';
 import 'package:edushare/widgets/custom_button.dart';
 import 'package:edushare/widgets/custom_textfield.dart';
 import 'package:edushare/widgets/glass_card.dart';
 import 'package:edushare/views/auth/register_screen.dart';
+import 'package:edushare/views/auth/pending_approval_screen.dart';
 import 'package:edushare/views/shell/main_shell.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -17,8 +19,9 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _emailController = TextEditingController();
+  final _identifierController = TextEditingController(); // email OR studentId
   final _passwordController = TextEditingController();
+
   // UI role keys — 'admin_ui' maps to backend 'faculty_admin'
   // (Super Admin is hidden from login UI)
   String _selectedRole = 'student';
@@ -28,68 +31,158 @@ class _LoginScreenState extends State<LoginScreen> {
     'admin_ui': 'faculty_admin',
   };
 
+  // ─── Student-specific login method ────────────────────────────────────
+  String _studentLoginMethod = 'email'; // 'email' | 'studentId'
+
+  // ─── Remember Me ──────────────────────────────────────────────────────
+  bool _rememberMe = false;
+
+  // ─── Quick Login state ────────────────────────────────────────────────
+  bool _quickLoginEnabled = false;
+  bool _biometricsAvailable = false;
+
   @override
-  void dispose() {
-    _emailController.dispose();
-    _passwordController.dispose();
-    super.dispose();
+  void initState() {
+    super.initState();
+    _loadSavedPreferences();
   }
 
-  void _handleLogin() async {
-    if (_formKey.currentState!.validate()) {
-      final authService = Provider.of<AuthService>(context, listen: false);
-      final email = _emailController.text.trim();
+  Future<void> _loadSavedPreferences() async {
+    final session = SessionService.instance;
+    final rememberMe = await session.getRememberMe();
+    final savedMethod = await session.getSavedMethod();
+    final savedIdentifier = await session.getSavedIdentifier();
+    final savedRole = await session.getSavedRole();
+    final quickLogin = await session.getQuickLoginEnabled();
 
-      // Check account status before login attempt
-      final statusData = await authService.getAccountStatus(email);
-      if (statusData != null) {
-        final status = statusData['status'] as String?;
-        if (status == 'pending') {
-          if (mounted) {
-            _showStatusMessage(
-              statusData['message'] as String? ?? 'Your Admin application is still under review.',
-              isWarning: true,
-            );
-          }
-          return;
-        } else if (status == 'rejected') {
-          final reason = statusData['rejectionReason'] as String? ?? 'No reason provided.';
-          final msg = (statusData['message'] as String?) ??
-              'Your Admin application was rejected. Reason: $reason';
-          if (mounted) {
-            _showStatusMessage(msg, isError: true);
-          }
-          return;
-        } else if (status == 'disabled') {
-          if (mounted) {
-            _showStatusMessage(
-              statusData['message'] as String? ?? 'Your account has been disabled.',
-              isError: true,
-            );
-          }
-          return;
-        }
+    if (!mounted) return;
+
+    final authService = Provider.of<AuthService>(context, listen: false);
+
+    setState(() {
+      _rememberMe = rememberMe;
+      _quickLoginEnabled = quickLogin;
+      _biometricsAvailable = authService.biometricsAvailable;
+
+      // Restore saved login method for student role
+      if (savedRole == 'student' && savedMethod != null) {
+        _studentLoginMethod = savedMethod;
       }
 
-      // Map UI role to backend role value
-      final backendRole = _uiToBackendRole[_selectedRole] ?? _selectedRole;
-      final error = await authService.login(
-        email,
+      // Pre-fill the identifier if rememberMe was enabled
+      if (rememberMe && savedIdentifier != null && savedIdentifier.isNotEmpty) {
+        _identifierController.text = savedIdentifier;
+      }
+
+      // Restore role selection
+      if (savedRole != null) {
+        // Map backend role back to UI key
+        if (savedRole == 'student') _selectedRole = 'student';
+        else if (savedRole == 'contributor') _selectedRole = 'contributor';
+        else if (savedRole == 'faculty_admin') _selectedRole = 'admin_ui';
+        else _selectedRole = savedRole;
+      }
+    });
+  }
+
+  // ─── Login handler ─────────────────────────────────────────────────────
+  void _handleLogin() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    final authService = Provider.of<AuthService>(context, listen: false);
+    final identifier = _identifierController.text.trim();
+    final backendRole = _uiToBackendRole[_selectedRole] ?? _selectedRole;
+    final useStudentId = _selectedRole == 'student' && _studentLoginMethod == 'studentId';
+
+    // Pre-check account status
+    Map<String, dynamic>? statusData;
+    if (useStudentId) {
+      statusData = await authService.getAccountStatusByStudentId(identifier);
+    } else {
+      statusData = await authService.getAccountStatus(identifier);
+    }
+
+    if (statusData != null && mounted) {
+      final status = statusData['status'] as String?;
+      if (status == 'pending' || status == 'rejected') {
+        final reason = statusData['rejectionReason'] as String?;
+        final isContributor = (statusData['role'] as String?) == 'contributor';
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => PendingApprovalScreen(
+              name: (statusData?['name'] as String?) ?? '',
+              email: (statusData?['email'] as String?) ?? identifier,
+              department: (statusData?['department'] as String?) ?? '',
+              isPendingContributor: isContributor,
+              status: status!,
+              rejectionReason: reason,
+            ),
+          ),
+        );
+        return;
+      } else if (status == 'disabled') {
+        _showStatusMessage(
+          statusData['message'] as String? ?? 'Your account has been disabled.',
+          isError: true,
+        );
+        return;
+      }
+    }
+
+    String? error;
+    if (useStudentId) {
+      error = await authService.loginWithStudentId(
+        identifier,
         _passwordController.text,
         backendRole,
+        rememberMe: _rememberMe,
       );
+    } else {
+      error = await authService.login(
+        identifier,
+        _passwordController.text,
+        backendRole,
+        rememberMe: _rememberMe,
+      );
+    }
 
-      if (error != null) {
-        if (mounted) {
-          _showStatusMessage(error, isError: true);
-        }
-      } else {
-        if (mounted) {
-          Navigator.of(context).pushAndRemoveUntil(
-            MaterialPageRoute(builder: (_) => const MainShell()),
-            (_) => false,
-          );
-        }
+    if (error != null) {
+      if (mounted) _showStatusMessage(error, isError: true);
+    } else {
+      if (mounted) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const MainShell()),
+          (_) => false,
+        );
+      }
+    }
+  }
+
+  // ─── Quick (Biometric) Login ───────────────────────────────────────────
+  void _handleQuickLogin() async {
+    final authService = Provider.of<AuthService>(context, listen: false);
+
+    final authenticated = await authService.authenticateWithBiometrics();
+    if (!authenticated) {
+      if (mounted) {
+        _showStatusMessage('Biometric authentication failed. Please sign in manually.', isError: true);
+      }
+      return;
+    }
+
+    // Biometric passed — restore the existing session token
+    await authService.restoreSession();
+
+    if (authService.currentUser != null) {
+      if (mounted) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const MainShell()),
+          (_) => false,
+        );
+      }
+    } else {
+      if (mounted) {
+        _showStatusMessage('Session expired. Please sign in with your password.', isWarning: true);
       }
     }
   }
@@ -107,6 +200,31 @@ class _LoginScreenState extends State<LoginScreen> {
         duration: const Duration(seconds: 4),
       ),
     );
+  }
+
+  // ─── Helpers ───────────────────────────────────────────────────────────
+  bool get _isStudentRole => _selectedRole == 'student';
+  bool get _useStudentIdMethod => _isStudentRole && _studentLoginMethod == 'studentId';
+
+  String get _identifierLabel =>
+      _useStudentIdMethod ? 'STUDENT ID' : 'UNIVERSITY EMAIL';
+
+  String get _identifierHint =>
+      _useStudentIdMethod ? 'e.g. 21234567890' : 'yourname@bubt.edu.bd';
+
+  IconData get _identifierIcon =>
+      _useStudentIdMethod ? Icons.badge_outlined : Icons.email_outlined;
+
+  String? _identifierValidator(String? val) {
+    if (_useStudentIdMethod) return AuthService.validateStudentId(val);
+    return AuthService.validateEmail(val);
+  }
+
+  @override
+  void dispose() {
+    _identifierController.dispose();
+    _passwordController.dispose();
+    super.dispose();
   }
 
   @override
@@ -196,29 +314,6 @@ class _LoginScreenState extends State<LoginScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          CustomTextField(
-                            label: 'UNIVERSITY EMAIL',
-                            hint: 'yourname@bubt.edu.bd',
-                            controller: _emailController,
-                            keyboardType: TextInputType.emailAddress,
-                            prefixIcon: Icons.email_outlined,
-                            validator: AuthService.validateEmail,
-                          ),
-                          const SizedBox(height: 20),
-                          CustomTextField(
-                            label: 'PASSWORD',
-                            hint: 'Enter your password',
-                            controller: _passwordController,
-                            isPassword: true,
-                            prefixIcon: Icons.lock_outline_rounded,
-                            validator: (val) {
-                              if (val == null || val.isEmpty) return 'Please enter your password';
-                              if (val.length < 6) return 'Password must be at least 6 characters';
-                              return null;
-                            },
-                          ),
-                          const SizedBox(height: 24),
-
                           // ─── Role Selection ──────────────────────────
                           Text(
                             'SIGN IN AS',
@@ -244,13 +339,57 @@ class _LoginScreenState extends State<LoginScreen> {
                                   Icons.manage_accounts_outlined),
                             ],
                           ),
+                          const SizedBox(height: 20),
 
-                          const SizedBox(height: 30),
+                          // ─── Student login method toggle ─────────────
+                          if (_isStudentRole) ...[
+                            _buildLoginMethodToggle(theme),
+                            const SizedBox(height: 16),
+                          ],
+
+                          // ─── Identifier field (email or student ID) ──
+                          CustomTextField(
+                            label: _identifierLabel,
+                            hint: _identifierHint,
+                            controller: _identifierController,
+                            keyboardType: _useStudentIdMethod
+                                ? TextInputType.text
+                                : TextInputType.emailAddress,
+                            prefixIcon: _identifierIcon,
+                            validator: _identifierValidator,
+                          ),
+                          const SizedBox(height: 20),
+
+                          // ─── Password ────────────────────────────────
+                          CustomTextField(
+                            label: 'PASSWORD',
+                            hint: 'Enter your password',
+                            controller: _passwordController,
+                            isPassword: true,
+                            prefixIcon: Icons.lock_outline_rounded,
+                            validator: (val) {
+                              if (val == null || val.isEmpty) return 'Please enter your password';
+                              if (val.length < 6) return 'Password must be at least 6 characters';
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: 12),
+
+                          // ─── Remember Me ─────────────────────────────
+                          _buildRememberMeRow(theme),
+                          const SizedBox(height: 20),
+
                           CustomButton(
                             text: 'Sign In',
                             isLoading: isLoading,
                             onPressed: _handleLogin,
                           ),
+
+                          // ─── Quick Login / Biometrics ─────────────────
+                          if (_quickLoginEnabled && _biometricsAvailable) ...[
+                            const SizedBox(height: 12),
+                            _buildQuickLoginButton(theme),
+                          ],
                         ],
                       ),
                     ),
@@ -290,13 +429,119 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
+  // ─── Student login method toggle widget ─────────────────────────────────
+  Widget _buildLoginMethodToggle(ThemeData theme) {
+    final isDark = theme.brightness == Brightness.dark;
+    final inactiveColor = isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary;
+
+    return Container(
+      height: 40,
+      decoration: BoxDecoration(
+        color: isDark
+            ? Colors.white.withOpacity(0.05)
+            : Colors.black.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        children: [
+          _buildMethodTab('email', 'Email', Icons.email_outlined, inactiveColor),
+          _buildMethodTab('studentId', 'Student ID', Icons.badge_outlined, inactiveColor),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMethodTab(String method, String label, IconData icon, Color inactiveColor) {
+    final isSelected = _studentLoginMethod == method;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => setState(() {
+          _studentLoginMethod = method;
+          _identifierController.clear(); // clear on toggle to avoid wrong type
+        }),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          margin: const EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            color: isSelected ? AppTheme.primaryColor : Colors.transparent,
+            borderRadius: BorderRadius.circular(7),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon,
+                  size: 14,
+                  color: isSelected ? Colors.white : inactiveColor),
+              const SizedBox(width: 5),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: isSelected ? Colors.white : inactiveColor,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ─── Remember Me row ────────────────────────────────────────────────────
+  Widget _buildRememberMeRow(ThemeData theme) {
+    return Row(
+      children: [
+        SizedBox(
+          width: 20,
+          height: 20,
+          child: Checkbox(
+            value: _rememberMe,
+            onChanged: (val) => setState(() => _rememberMe = val ?? false),
+            activeColor: AppTheme.primaryColor,
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+          ),
+        ),
+        const SizedBox(width: 8),
+        GestureDetector(
+          onTap: () => setState(() => _rememberMe = !_rememberMe),
+          child: Text(
+            'Remember me',
+            style: theme.textTheme.bodyMedium?.copyWith(fontSize: 13),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ─── Quick Login / Biometric button ────────────────────────────────────
+  Widget _buildQuickLoginButton(ThemeData theme) {
+    return OutlinedButton.icon(
+      onPressed: _handleQuickLogin,
+      icon: const Icon(Icons.fingerprint_rounded, size: 20),
+      label: const Text('Sign in with Biometrics'),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: AppTheme.primaryColor,
+        side: const BorderSide(color: AppTheme.primaryColor, width: 1.5),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        padding: const EdgeInsets.symmetric(vertical: 12),
+      ),
+    );
+  }
+
+  // ─── Role chip ──────────────────────────────────────────────────────────
   Widget _buildRoleChip(String role, String label, IconData icon) {
     final isSelected = _selectedRole == role;
     final theme = Theme.of(context);
 
     return Expanded(
       child: GestureDetector(
-        onTap: () => setState(() => _selectedRole = role),
+        onTap: () => setState(() {
+          _selectedRole = role;
+          _identifierController.clear();
+          if (role != 'student') _studentLoginMethod = 'email';
+        }),
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 10),
           decoration: BoxDecoration(

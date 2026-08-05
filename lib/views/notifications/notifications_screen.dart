@@ -109,12 +109,18 @@ class _NotificationTile extends StatelessWidget {
   Color _typeColor() {
     if (notification.isApproval) return const Color(0xFF10B981);
     if (notification.isRejection) return const Color(0xFFEF4444);
+    if (notification.isRating) return const Color(0xFFF59E0B);
+    if (notification.isPublished) return AppTheme.primaryColor;
+    if (notification.isRegistration) return const Color(0xFF8B5CF6);
     return AppTheme.primaryColor; // upload_assigned
   }
 
   IconData _typeIcon() {
     if (notification.isApproval) return Icons.check_circle_rounded;
     if (notification.isRejection) return Icons.cancel_rounded;
+    if (notification.isRating) return Icons.star_rounded;
+    if (notification.isPublished) return Icons.new_releases_rounded;
+    if (notification.isRegistration) return Icons.person_add_rounded;
     return Icons.assignment_rounded; // upload_assigned
   }
 
