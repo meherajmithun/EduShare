@@ -62,13 +62,31 @@ class _UsersScreenState extends State<UsersScreen> {
     }
   }
 
+  List<Map<String, String>> _getRoles(bool isSuperAdmin) {
+    if (isSuperAdmin) {
+      return [
+        {'value': 'all', 'label': 'All'},
+        {'value': 'student', 'label': 'Students'},
+        {'value': 'contributor', 'label': 'Contributors'},
+        {'value': 'admin', 'label': 'Admins'},
+      ];
+    }
+    return [
+      {'value': 'all', 'label': 'All'},
+      {'value': 'student', 'label': 'Students'},
+      {'value': 'contributor', 'label': 'Contributors'},
+    ];
+  }
+
   void _applyFilter() {
     final currentUser =
         Provider.of<AuthService>(context, listen: false).currentUser;
-    // Always hide super_admin user accounts from non-super_admin users
+    final isSuper = currentUser?.isSuperAdmin ?? false;
+
+    // Non-Super-Admins can ONLY see Students and Contributors
     final visibleUsers = _users.where((u) {
-      if (u.role == 'super_admin' && !(currentUser?.isSuperAdmin ?? false)) {
-        return false;
+      if (!isSuper) {
+        return u.role == 'student' || u.role == 'contributor';
       }
       return true;
     }).toList();
@@ -77,7 +95,7 @@ class _UsersScreenState extends State<UsersScreen> {
       _filtered = visibleUsers;
     } else if (_filterRole == 'admin') {
       _filtered = visibleUsers
-          .where((u) => u.role == 'admin' || u.role == 'faculty_admin')
+          .where((u) => u.role == 'admin' || u.role == 'faculty_admin' || u.role == 'super_admin')
           .toList();
     } else {
       _filtered = visibleUsers.where((u) => u.role == _filterRole).toList();
@@ -184,50 +202,55 @@ class _UsersScreenState extends State<UsersScreen> {
           : Column(
               children: [
                 // ─── Role filter chips ───────────────────────────────
-                SizedBox(
-                  height: 48,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    itemCount: _roles.length,
-                    itemBuilder: (context, i) {
-                      final r = _roles[i];
-                      final isSelected = _filterRole == r['value'];
-                      return Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: GestureDetector(
-                          onTap: () => setState(() {
-                            _filterRole = r['value']!;
-                            _applyFilter();
-                          }),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 14, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: isSelected
-                                  ? AppTheme.primaryColor.withOpacity(0.15)
-                                  : Colors.transparent,
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                color: isSelected
-                                    ? AppTheme.primaryColor
-                                    : theme.dividerColor,
-                                width: 1.5,
+                Builder(
+                  builder: (context) {
+                    final roles = _getRoles(currentUser?.isSuperAdmin ?? false);
+                    return SizedBox(
+                      height: 48,
+                      child: ListView.builder(
+                        scrollDirection: Axis.horizontal,
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        itemCount: roles.length,
+                        itemBuilder: (context, i) {
+                          final r = roles[i];
+                          final isSelected = _filterRole == r['value'];
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: GestureDetector(
+                              onTap: () => setState(() {
+                                _filterRole = r['value']!;
+                                _applyFilter();
+                              }),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 14, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: isSelected
+                                      ? AppTheme.primaryColor.withOpacity(0.15)
+                                      : Colors.transparent,
+                                  borderRadius: BorderRadius.circular(20),
+                                  border: Border.all(
+                                    color: isSelected
+                                        ? AppTheme.primaryColor
+                                        : theme.dividerColor,
+                                    width: 1.5,
+                                  ),
+                                ),
+                                child: Text(r['label']!,
+                                    style: theme.textTheme.bodyMedium?.copyWith(
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 12,
+                                      color: isSelected
+                                          ? AppTheme.primaryColor
+                                          : null,
+                                    )),
                               ),
                             ),
-                            child: Text(r['label']!,
-                                style: theme.textTheme.bodyMedium?.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 12,
-                                  color: isSelected
-                                      ? AppTheme.primaryColor
-                                      : null,
-                                )),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
+                          );
+                        },
+                      ),
+                    );
+                  },
                 ),
 
                 // ─── User list ───────────────────────────────────────

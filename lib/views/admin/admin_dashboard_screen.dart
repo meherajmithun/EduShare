@@ -234,21 +234,58 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       mainAxisSpacing: 12,
                       childAspectRatio: 1.4,
                       children: [
-                        _statCard(context, 'Total Materials',
-                            _total.toString(), Icons.folder_rounded,
-                            AppTheme.primaryColor, isDark),
-                        _statCard(context, 'Pending Review',
-                            _pending.toString(),
-                            Icons.hourglass_top_rounded,
-                            const Color(0xFFF59E0B), isDark),
-                        _statCard(context, 'Approved',
-                            _approved.toString(),
-                            Icons.check_circle_rounded,
-                            const Color(0xFF10B981), isDark),
-                        _statCard(context, 'Rejected',
-                            _rejected.toString(),
-                            Icons.cancel_rounded,
-                            const Color(0xFFEF4444), isDark),
+                        _statCard(
+                          context,
+                          'Total Materials',
+                          _total.toString(),
+                          Icons.folder_rounded,
+                          AppTheme.primaryColor,
+                          isDark,
+                          onTap: () => Navigator.of(context)
+                              .push(MaterialPageRoute(
+                                builder: (_) => const AllMaterialsScreen(),
+                              ))
+                              .then((_) => _loadStats()),
+                        ),
+                        _statCard(
+                          context,
+                          'Pending Review',
+                          _pending.toString(),
+                          Icons.hourglass_top_rounded,
+                          const Color(0xFFF59E0B),
+                          isDark,
+                          onTap: () => Navigator.of(context)
+                              .push(MaterialPageRoute(
+                                builder: (_) => const ApprovalsScreen(),
+                              ))
+                              .then((_) => _loadStats()),
+                        ),
+                        _statCard(
+                          context,
+                          'Approved',
+                          _approved.toString(),
+                          Icons.check_circle_rounded,
+                          const Color(0xFF10B981),
+                          isDark,
+                          onTap: () => Navigator.of(context)
+                              .push(MaterialPageRoute(
+                                builder: (_) => const AllMaterialsScreen(),
+                              ))
+                              .then((_) => _loadStats()),
+                        ),
+                        _statCard(
+                          context,
+                          'Rejected',
+                          _rejected.toString(),
+                          Icons.cancel_rounded,
+                          const Color(0xFFEF4444),
+                          isDark,
+                          onTap: () => Navigator.of(context)
+                              .push(MaterialPageRoute(
+                                builder: (_) => const AllMaterialsScreen(),
+                              ))
+                              .then((_) => _loadStats()),
+                        ),
                       ],
                     ),
                     const SizedBox(height: 16),
@@ -263,6 +300,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       icon: Icons.people_rounded,
                       color: const Color(0xFF8B5CF6),
                       isDark: isDark,
+                      onTap: () => Navigator.of(context)
+                          .push(MaterialPageRoute(
+                            builder: (_) => const UsersScreen(),
+                          ))
+                          .then((_) => _loadStats()),
                     ),
                     const SizedBox(height: 28),
 
@@ -375,44 +417,47 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   Widget _statCard(BuildContext context, String label, String value,
-      IconData icon, Color color, bool isDark) {
+      IconData icon, Color color, bool isDark, {VoidCallback? onTap}) {
     final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: isDark ? AppTheme.darkCard : AppTheme.lightCard,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: color.withOpacity(0.3),
-          width: 1.5,
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: isDark ? AppTheme.darkCard : AppTheme.lightCard,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: color.withOpacity(0.3),
+            width: 1.5,
+          ),
         ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(icon, color: color, size: 20),
-          ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                value,
-                style: theme.textTheme.displayLarge
-                    ?.copyWith(fontSize: 28, color: color),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(10),
               ),
-              Text(label,
-                  style: theme.textTheme.bodyMedium
-                      ?.copyWith(fontSize: 11)),
-            ],
-          ),
-        ],
+              child: Icon(icon, color: color, size: 20),
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  value,
+                  style: theme.textTheme.displayLarge
+                      ?.copyWith(fontSize: 28, color: color),
+                ),
+                Text(label,
+                    style: theme.textTheme.bodyMedium
+                        ?.copyWith(fontSize: 11)),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -423,40 +468,44 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     required IconData icon,
     required Color color,
     required bool isDark,
+    VoidCallback? onTap,
   }) {
     final theme = Theme.of(context);
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: isDark ? AppTheme.darkCard : AppTheme.lightCard,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: color.withOpacity(0.3), width: 1.5),
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(icon, color: color, size: 24),
-          ),
-          const SizedBox(width: 16),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                value,
-                style: theme.textTheme.displayLarge
-                    ?.copyWith(fontSize: 32, color: color),
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: isDark ? AppTheme.darkCard : AppTheme.lightCard,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: color.withOpacity(0.3), width: 1.5),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(12),
               ),
-              Text(label,
-                  style: theme.textTheme.bodyMedium?.copyWith(fontSize: 12)),
-            ],
-          ),
-        ],
+              child: Icon(icon, color: color, size: 24),
+            ),
+            const SizedBox(width: 16),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  value,
+                  style: theme.textTheme.displayLarge
+                      ?.copyWith(fontSize: 32, color: color),
+                ),
+                Text(label,
+                    style: theme.textTheme.bodyMedium?.copyWith(fontSize: 12)),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

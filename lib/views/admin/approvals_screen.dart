@@ -322,10 +322,18 @@ class _ApprovalsScreenState extends State<ApprovalsScreen>
                   borderRadius: BorderRadius.circular(10)),
             ),
             onPressed: () {
+              final reason = reasonCtrl.text.trim();
+              if (reason.isEmpty) {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(
+                    content: Text('Please provide a rejection reason.'),
+                    backgroundColor: Color(0xFFEF4444),
+                  ),
+                );
+                return;
+              }
               Navigator.pop(ctx, {
-                'reason': reasonCtrl.text.trim().isNotEmpty
-                    ? reasonCtrl.text.trim()
-                    : 'No reason provided.',
+                'reason': reason,
                 'reviewComment': commentCtrl.text.trim(),
               });
             },
