@@ -5,6 +5,8 @@ import 'package:edushare/core/services/auth_service.dart';
 import 'package:edushare/core/services/firestore_service.dart';
 import 'package:edushare/models/material_model.dart';
 import 'package:edushare/widgets/glass_card.dart';
+import 'package:edushare/widgets/notification_bell.dart';
+import 'package:edushare/widgets/app_bar_profile_avatar.dart';
 
 /// Shows the current contributor/admin user's own uploaded materials
 /// with live pending / approved / rejected status, assigned reviewer,
@@ -116,16 +118,15 @@ class _MyUploadsScreenState extends State<MyUploadsScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          'My Uploads',
-          style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-        ),
+        leadingWidth: 180,
+        leading: const AppBarProfileAvatar(),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             tooltip: 'Refresh',
             onPressed: _loadMyUploads,
           ),
+          const NotificationBell(),
         ],
       ),
       body: _isLoading

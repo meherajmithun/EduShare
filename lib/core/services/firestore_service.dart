@@ -152,22 +152,46 @@ class FirestoreService {
     MaterialModel material, {
     Uint8List? fileBytes,
     String? fileName,
+    String? videoSource, // 'cloudinary' | 'youtube' | null
   }) async {
-    if (fileBytes != null && material.type != 'video') {
+    final isYouTubeUpload =
+        material.type == 'video' && (videoSource ?? material.videoSource) == 'youtube';
+    final isCloudinaryVideoUpload =
+        material.type == 'video' && (videoSource ?? material.videoSource) == 'cloudinary';
+
+    if (isYouTubeUpload) {
+      // YouTube: JSON body, no file
+      await _api.post('/api/materials', {
+        'title': material.title,
+        'description': material.description,
+        'type': material.type,
+        'videoSource': 'youtube',
+        'videoLink': material.videoLink ?? '',
+        'courseId': material.courseId,
+        'departmentId': material.departmentId,
+      });
+    } else if (fileBytes != null) {
+      // File upload (Cloudinary video OR document/PDF)
+      final extraFields = <String, String>{
+        'title': material.title,
+        'description': material.description,
+        'type': material.type,
+        'courseId': material.courseId,
+        'departmentId': material.departmentId,
+      };
+      if (isCloudinaryVideoUpload) {
+        extraFields['videoSource'] = 'cloudinary';
+      }
+
       await _api.postMultipartBytes(
         '/api/materials',
         bytes: fileBytes,
         fileName: fileName ?? 'upload',
         fileField: 'file',
-        fields: {
-          'title': material.title,
-          'description': material.description,
-          'type': material.type,
-          'courseId': material.courseId,
-          'departmentId': material.departmentId,
-        },
+        fields: extraFields,
       );
     } else {
+      // Fallback JSON (e.g. legacy or no file selected — should not normally reach here)
       await _api.post('/api/materials', {
         'title': material.title,
         'description': material.description,

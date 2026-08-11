@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:edushare/core/theme.dart';
+import 'package:edushare/core/services/auth_service.dart';
 import 'package:edushare/core/services/firestore_service.dart';
+import 'package:edushare/core/role_helper.dart';
 import 'package:edushare/models/department_model.dart';
 import 'package:edushare/models/course_model.dart';
 import 'package:edushare/widgets/glass_card.dart';
+import 'package:edushare/widgets/notification_bell.dart';
+import 'package:edushare/widgets/app_bar_profile_avatar.dart';
 import 'package:edushare/views/course/course_details_screen.dart';
 
 /// Dedicated Search tab — search courses by name/code, filter by department.
@@ -39,16 +44,40 @@ class _SearchScreenState extends State<SearchScreen> {
 
   void _loadData() async {
     try {
+      final authService = Provider.of<AuthService>(context, listen: false);
+      final user = authService.currentUser;
       final depts = await _firestoreService.getDepartments();
-      List<CourseModel> courses = [];
-      for (var dept in depts) {
-        final deptCourses = await _firestoreService.getCourses(dept.id);
-        courses.addAll(deptCourses);
+
+      DepartmentModel? userDept;
+      if (user != null && (user.isStudent || user.isContributor)) {
+        for (final dept in depts) {
+          if (dept.id == user.departmentId ||
+              dept.code == user.department ||
+              dept.name == user.department ||
+              user.department.contains(dept.code)) {
+            userDept = dept;
+            break;
+          }
+        }
       }
+
+      List<CourseModel> courses = [];
+      if (userDept != null) {
+        courses = await _firestoreService.getCourses(userDept.id);
+      } else {
+        for (var dept in depts) {
+          final deptCourses = await _firestoreService.getCourses(dept.id);
+          courses.addAll(deptCourses);
+        }
+      }
+
       setState(() {
-        _departments = depts;
+        _departments = (user != null && (user.isStudent || user.isContributor) && userDept != null)
+            ? [userDept]
+            : depts;
         _allCourses = courses;
         _filteredCourses = courses;
+        _selectedDept = userDept;
         _isLoading = false;
       });
     } catch (e) {
@@ -91,18 +120,9 @@ class _SearchScreenState extends State<SearchScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Row(
-          children: [
-            const Icon(Icons.search_rounded,
-                color: AppTheme.primaryColor, size: 26),
-            const SizedBox(width: 10),
-            Text(
-              'Search Courses',
-              style:
-                  theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-            ),
-          ],
-        ),
+        leadingWidth: 180,
+        leading: const AppBarProfileAvatar(),
+        actions: const [NotificationBell()],
       ),
       body: _isLoading
           ? const Center(

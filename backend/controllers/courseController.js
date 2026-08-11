@@ -35,7 +35,10 @@ const getCourses = async (req, res) => {
   const { departmentId, includeAll } = req.query;
 
   const filter = {};
-  if (departmentId) {
+  if (['student', 'contributor'].includes(req.user?.role) && req.user?.departmentId) {
+    // Students and contributors ONLY see courses from their department
+    filter.departmentId = req.user.departmentId;
+  } else if (departmentId) {
     filter.departmentId = departmentId;
   } else if (['faculty_admin', 'admin'].includes(req.user?.role) && req.user?.departmentId) {
     filter.departmentId = req.user.departmentId;

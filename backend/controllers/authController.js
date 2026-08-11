@@ -106,7 +106,7 @@ const register = async (req, res) => {
     return res.status(201).json(
       success(
         { pending: true, userId: contributor._id.toString() },
-        'Registration submitted. Your account is pending Faculty Admin approval. You will be notified once approved.'
+        'Registration submitted. Your account is pending Admin approval. You will be notified once approved.'
       )
     );
   }
@@ -334,7 +334,7 @@ const login = async (req, res) => {
   // Status check — return structured response for pending/rejected (not a crash)
   if (user.status === 'pending') {
     const msg = (user.role === 'contributor')
-      ? 'Your contributor account is pending Faculty Admin approval. You will be notified once approved.'
+      ? 'Your contributor account is pending Admin approval. You will be notified once approved.'
       : 'Your Admin application is still under review by the Super Admin.';
     return res.status(403).json({
       success: false,

@@ -5,9 +5,12 @@
  * to Cloudinary v2 — avoids the multer-storage-cloudinary peer-dep conflict.
  *
  * Provides:
- *  - upload        — multer middleware (stores file in memory, then streams to Cloudinary)
- *  - uploadBuffer() — upload a raw Buffer directly
- *  - deleteFile()  — remove a file from Cloudinary by public_id
+ *  - uploadDoc      — multer middleware for documents/PDFs/images (20 MB)
+ *  - uploadVideo    — multer middleware for video files (200 MB)
+ *  - upload         — alias for uploadDoc (backward compat)
+ *  - uploadBuffer() — upload a raw Buffer as a document/raw resource
+ *  - uploadVideoBuffer() — upload a raw Buffer as a video resource
+ *  - deleteFile()   — remove a file from Cloudinary by public_id
  */
 
 const path = require('path');
@@ -22,8 +25,9 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// ─── Allowed mime types and extensions ────────────────────────────────
-const ALLOWED_MIMES = [
+// ─── Allowed mime types ─────────────────────────────────────────────────
+
+const ALLOWED_DOC_MIMES = [
   'application/pdf',
   'application/x-pdf',
   'application/acrobat',
@@ -39,17 +43,31 @@ const ALLOWED_MIMES = [
   'application/octet-stream',
 ];
 
-const ALLOWED_EXTENSIONS = ['.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png', '.webp'];
+const ALLOWED_DOC_EXTENSIONS = ['.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png', '.webp'];
 
-// ─── Multer (memory storage) ───────────────────────────────────────────
-// Files land in req.file.buffer — we stream them to Cloudinary manually
-const upload = multer({
+const ALLOWED_VIDEO_MIMES = [
+  'video/mp4',
+  'video/x-matroska',
+  'video/quicktime',
+  'video/x-msvideo',
+  'video/webm',
+  'video/mpeg',
+  'video/ogg',
+  'video/3gpp',
+  'video/x-flv',
+  'application/octet-stream', // some devices send this for videos
+];
+
+const ALLOWED_VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.mov', '.avi', '.webm', '.mpeg', '.ogv', '.3gp', '.flv'];
+
+// ─── Multer — Document/PDF (20 MB) ────────────────────────────────────
+const uploadDoc = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname || '').toLowerCase();
-    const isAllowedExt = ALLOWED_EXTENSIONS.includes(ext);
-    const isAllowedMime = ALLOWED_MIMES.includes(file.mimetype);
+    const isAllowedExt = ALLOWED_DOC_EXTENSIONS.includes(ext);
+    const isAllowedMime = ALLOWED_DOC_MIMES.includes(file.mimetype);
 
     if (isAllowedExt || isAllowedMime) {
       cb(null, true);
@@ -59,8 +77,40 @@ const upload = multer({
   },
 });
 
+// ─── Multer — Video (200 MB) ────────────────────────────────────────────
+const uploadVideo = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 200 * 1024 * 1024 }, // 200 MB
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    const isAllowedExt = ALLOWED_VIDEO_EXTENSIONS.includes(ext);
+    const isAllowedMime = ALLOWED_VIDEO_MIMES.includes(file.mimetype);
+
+    if (isAllowedExt || isAllowedMime) {
+      cb(null, true);
+    } else {
+      cb(new Error('Video format not supported. Allowed: MP4, MKV, MOV, AVI, WebM.'), false);
+    }
+  },
+});
+
+// Backward-compatible alias (used by existing routes)
+const upload = uploadDoc;
+
+// ─── Smart middleware: picks uploadVideo or uploadDoc based on type field ──
+// Must be used as a function factory since multer needs to be called per request.
+const smartUpload = (req, res, next) => {
+  // Peek at the multipart type field before multer runs.
+  // We use a raw multipart parser to read the first few fields.
+  // Simpler approach: always read the type from req.body after multer, but
+  // multer must run first to populate req.body for multipart.
+  // Solution: use uploadVideo for all — it accepts a wider set and higher limit.
+  // For doc-only routes use uploadDoc explicitly.
+  uploadVideo.single('file')(req, res, next);
+};
+
 /**
- * Stream a Buffer to Cloudinary.
+ * Stream a Buffer to Cloudinary as a document/raw resource.
  * @param {Buffer} buffer
  * @param {string} [folder]
  * @param {string} [publicId]  Optional custom public_id
@@ -68,7 +118,28 @@ const upload = multer({
  */
 const uploadBuffer = (buffer, folder = 'edushare/materials', publicId) => {
   return new Promise((resolve, reject) => {
-    const opts = { folder, resource_type: 'auto' };
+    const opts = { folder, resource_type: 'raw' };
+    if (publicId) opts.public_id = publicId;
+
+    const uploadStream = cloudinary.uploader.upload_stream(opts, (error, result) => {
+      if (error) return reject(error);
+      resolve({ url: result.secure_url, publicId: result.public_id });
+    });
+
+    streamifier.createReadStream(buffer).pipe(uploadStream);
+  });
+};
+
+/**
+ * Stream a Buffer to Cloudinary as a video resource.
+ * @param {Buffer} buffer
+ * @param {string} [folder]
+ * @param {string} [publicId]  Optional custom public_id
+ * @returns {Promise<{url: string, publicId: string}>}
+ */
+const uploadVideoBuffer = (buffer, folder = 'edushare/videos', publicId) => {
+  return new Promise((resolve, reject) => {
+    const opts = { folder, resource_type: 'video' };
     if (publicId) opts.public_id = publicId;
 
     const uploadStream = cloudinary.uploader.upload_stream(opts, (error, result) => {
@@ -93,4 +164,4 @@ const deleteFile = async (publicId, resourceType = 'raw') => {
   }
 };
 
-module.exports = { upload, uploadBuffer, deleteFile };
+module.exports = { upload, uploadDoc, uploadVideo, smartUpload, uploadBuffer, uploadVideoBuffer, deleteFile };

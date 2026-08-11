@@ -34,13 +34,6 @@ class _LoginScreenState extends State<LoginScreen> {
   // ─── Student-specific login method ────────────────────────────────────
   String _studentLoginMethod = 'email'; // 'email' | 'studentId'
 
-  // ─── Remember Me ──────────────────────────────────────────────────────
-  bool _rememberMe = false;
-
-  // ─── Quick Login state ────────────────────────────────────────────────
-  bool _quickLoginEnabled = false;
-  bool _biometricsAvailable = false;
-
   @override
   void initState() {
     super.initState();
@@ -49,29 +42,15 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _loadSavedPreferences() async {
     final session = SessionService.instance;
-    final rememberMe = await session.getRememberMe();
     final savedMethod = await session.getSavedMethod();
-    final savedIdentifier = await session.getSavedIdentifier();
     final savedRole = await session.getSavedRole();
-    final quickLogin = await session.getQuickLoginEnabled();
 
     if (!mounted) return;
 
-    final authService = Provider.of<AuthService>(context, listen: false);
-
     setState(() {
-      _rememberMe = rememberMe;
-      _quickLoginEnabled = quickLogin;
-      _biometricsAvailable = authService.biometricsAvailable;
-
       // Restore saved login method for student role
       if (savedRole == 'student' && savedMethod != null) {
         _studentLoginMethod = savedMethod;
-      }
-
-      // Pre-fill the identifier if rememberMe was enabled
-      if (rememberMe && savedIdentifier != null && savedIdentifier.isNotEmpty) {
-        _identifierController.text = savedIdentifier;
       }
 
       // Restore role selection
@@ -135,14 +114,14 @@ class _LoginScreenState extends State<LoginScreen> {
         identifier,
         _passwordController.text,
         backendRole,
-        rememberMe: _rememberMe,
+        rememberMe: false,
       );
     } else {
       error = await authService.login(
         identifier,
         _passwordController.text,
         backendRole,
-        rememberMe: _rememberMe,
+        rememberMe: false,
       );
     }
 
@@ -158,34 +137,7 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  // ─── Quick (Biometric) Login ───────────────────────────────────────────
-  void _handleQuickLogin() async {
-    final authService = Provider.of<AuthService>(context, listen: false);
 
-    final authenticated = await authService.authenticateWithBiometrics();
-    if (!authenticated) {
-      if (mounted) {
-        _showStatusMessage('Biometric authentication failed. Please sign in manually.', isError: true);
-      }
-      return;
-    }
-
-    // Biometric passed — restore the existing session token
-    await authService.restoreSession();
-
-    if (authService.currentUser != null) {
-      if (mounted) {
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const MainShell()),
-          (_) => false,
-        );
-      }
-    } else {
-      if (mounted) {
-        _showStatusMessage('Session expired. Please sign in with your password.', isWarning: true);
-      }
-    }
-  }
 
   void _showStatusMessage(String message, {bool isWarning = false, bool isError = false}) {
     final color = isError
@@ -375,8 +327,6 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                           const SizedBox(height: 12),
 
-                          // ─── Remember Me ─────────────────────────────
-                          _buildRememberMeRow(theme),
                           const SizedBox(height: 20),
 
                           CustomButton(
@@ -384,12 +334,6 @@ class _LoginScreenState extends State<LoginScreen> {
                             isLoading: isLoading,
                             onPressed: _handleLogin,
                           ),
-
-                          // ─── Quick Login / Biometrics ─────────────────
-                          if (_quickLoginEnabled && _biometricsAvailable) ...[
-                            const SizedBox(height: 12),
-                            _buildQuickLoginButton(theme),
-                          ],
                         ],
                       ),
                     ),
@@ -488,47 +432,7 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  // ─── Remember Me row ────────────────────────────────────────────────────
-  Widget _buildRememberMeRow(ThemeData theme) {
-    return Row(
-      children: [
-        SizedBox(
-          width: 20,
-          height: 20,
-          child: Checkbox(
-            value: _rememberMe,
-            onChanged: (val) => setState(() => _rememberMe = val ?? false),
-            activeColor: AppTheme.primaryColor,
-            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-          ),
-        ),
-        const SizedBox(width: 8),
-        GestureDetector(
-          onTap: () => setState(() => _rememberMe = !_rememberMe),
-          child: Text(
-            'Remember me',
-            style: theme.textTheme.bodyMedium?.copyWith(fontSize: 13),
-          ),
-        ),
-      ],
-    );
-  }
 
-  // ─── Quick Login / Biometric button ────────────────────────────────────
-  Widget _buildQuickLoginButton(ThemeData theme) {
-    return OutlinedButton.icon(
-      onPressed: _handleQuickLogin,
-      icon: const Icon(Icons.fingerprint_rounded, size: 20),
-      label: const Text('Sign in with Biometrics'),
-      style: OutlinedButton.styleFrom(
-        foregroundColor: AppTheme.primaryColor,
-        side: const BorderSide(color: AppTheme.primaryColor, width: 1.5),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        padding: const EdgeInsets.symmetric(vertical: 12),
-      ),
-    );
-  }
 
   // ─── Role chip ──────────────────────────────────────────────────────────
   Widget _buildRoleChip(String role, String label, IconData icon) {

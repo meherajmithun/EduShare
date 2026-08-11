@@ -4,6 +4,8 @@ import 'package:edushare/core/services/firestore_service.dart';
 import 'package:edushare/models/user_model.dart';
 import 'package:edushare/core/role_helper.dart';
 import 'package:edushare/widgets/glass_card.dart';
+import 'package:edushare/widgets/notification_bell.dart';
+import 'package:edushare/widgets/app_bar_profile_avatar.dart';
 
 /// Super Admin screen to manage Admin registrations.
 /// Tab 0: Pending (approve / reject with reason)
@@ -246,16 +248,9 @@ class _FacultyAdminsScreenState extends State<FacultyAdminsScreen>
 
     return Scaffold(
       appBar: AppBar(
-        title: Row(
-          children: [
-            const Icon(Icons.admin_panel_settings_rounded,
-                color: AppTheme.primaryColor, size: 24),
-            const SizedBox(width: 10),
-            Text('Admins',
-                style: theme.textTheme.titleLarge
-                    ?.copyWith(fontWeight: FontWeight.bold)),
-          ],
-        ),
+        leadingWidth: 180,
+        leading: const AppBarProfileAvatar(),
+        actions: const [NotificationBell()],
         bottom: TabBar(
           controller: _tabController,
           labelColor: AppTheme.primaryColor,

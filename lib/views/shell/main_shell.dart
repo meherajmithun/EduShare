@@ -1,14 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:edushare/core/theme.dart';
-import 'package:edushare/core/role_helper.dart';
 import 'package:edushare/core/services/auth_service.dart';
 import 'package:edushare/models/user_model.dart';
 import 'package:edushare/views/home/home_screen.dart';
 import 'package:edushare/views/home/search_screen.dart';
 import 'package:edushare/views/upload/upload_resource_screen.dart';
 import 'package:edushare/views/upload/my_uploads_screen.dart';
-import 'package:edushare/views/profile/profile_screen.dart';
 import 'package:edushare/views/admin/admin_dashboard_screen.dart';
 import 'package:edushare/views/admin/approvals_screen.dart';
 import 'package:edushare/views/admin/all_materials_screen.dart';
@@ -17,12 +15,15 @@ import 'package:edushare/views/admin/faculty_admins_screen.dart';
 import 'package:edushare/views/admin/manage_courses_screen.dart';
 
 /// Role-aware navigation shell.
-/// Dynamically builds bottom navigation tabs based on the logged-in user's role:
-///   Student       → Home · Search · Profile
-///   Contributor   → Home · Search · Upload · My Uploads · Profile
-///   Admin         → Dashboard · Approvals · Materials · Users · Profile
-///   Faculty Admin → Dashboard · Approvals · Materials · Users · Profile
-///   Super Admin   → Dashboard · Admins · Users · Profile
+/// Dynamically builds bottom navigation tabs based on the logged-in user's role.
+/// Profile is accessible via the top-left avatar in every screen's AppBar —
+/// it is NOT in the bottom navigation.
+///
+///   Student       → Home · Search
+///   Contributor   → Home · Search · Upload (modal) · My Uploads
+///   Admin         → Dashboard · Courses · Approvals · Materials · Users
+///   Faculty Admin → Dashboard · Courses · Approvals · Materials · Users
+///   Super Admin   → Dashboard · Admins · Users
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
 
@@ -46,7 +47,6 @@ class _MainShellState extends State<MainShell> {
 
   @override
   Widget build(BuildContext context) {
-    // Select only the user — avoids rebuild on isLoading changes.
     final user = context.select<AuthService, UserModel?>(
       (s) => s.currentUser,
     );
@@ -105,7 +105,7 @@ class _MainShellState extends State<MainShell> {
 
   List<_TabItem> _buildTabs(String role) {
     switch (role) {
-      // ── Super Admin ───────────────────────────────────────────────────
+      // ── Super Admin ─────────────────────────────────────────────────────
       case 'super_admin':
         return const [
           _TabItem(
@@ -126,15 +126,9 @@ class _MainShellState extends State<MainShell> {
             selectedIcon: Icons.people_rounded,
             screen: UsersScreen(),
           ),
-          _TabItem(
-            label: 'Profile',
-            icon: Icons.person_outline_rounded,
-            selectedIcon: Icons.person_rounded,
-            screen: ProfileScreen(),
-          ),
         ];
 
-      // ── Faculty Admin ─────────────────────────────────────────────────
+      // ── Faculty Admin ────────────────────────────────────────────────────
       case 'faculty_admin':
         return const [
           _TabItem(
@@ -167,15 +161,9 @@ class _MainShellState extends State<MainShell> {
             selectedIcon: Icons.people_rounded,
             screen: UsersScreen(),
           ),
-          _TabItem(
-            label: 'Profile',
-            icon: Icons.person_outline_rounded,
-            selectedIcon: Icons.person_rounded,
-            screen: ProfileScreen(),
-          ),
         ];
 
-      // ── Legacy Admin ──────────────────────────────────────────────────
+      // ── Legacy Admin ─────────────────────────────────────────────────────
       case 'admin':
         return const [
           _TabItem(
@@ -202,15 +190,9 @@ class _MainShellState extends State<MainShell> {
             selectedIcon: Icons.people_rounded,
             screen: UsersScreen(),
           ),
-          _TabItem(
-            label: 'Profile',
-            icon: Icons.person_outline_rounded,
-            selectedIcon: Icons.person_rounded,
-            screen: ProfileScreen(),
-          ),
         ];
 
-      // ── Contributor ───────────────────────────────────────────────────
+      // ── Contributor ──────────────────────────────────────────────────────
       case 'contributor':
         return const [
           _TabItem(
@@ -229,7 +211,7 @@ class _MainShellState extends State<MainShell> {
             label: 'Upload',
             icon: Icons.add_circle_outline_rounded,
             selectedIcon: Icons.add_circle_rounded,
-            screen: SizedBox.shrink(), // Modal — not a screen
+            screen: SizedBox.shrink(), // Modal — not a real screen
           ),
           _TabItem(
             label: 'My Uploads',
@@ -237,15 +219,9 @@ class _MainShellState extends State<MainShell> {
             selectedIcon: Icons.cloud_upload_rounded,
             screen: MyUploadsScreen(),
           ),
-          _TabItem(
-            label: 'Profile',
-            icon: Icons.person_outline_rounded,
-            selectedIcon: Icons.person_rounded,
-            screen: ProfileScreen(),
-          ),
         ];
 
-      // ── Student (default) ─────────────────────────────────────────────
+      // ── Student (default) ────────────────────────────────────────────────
       default:
         return const [
           _TabItem(
@@ -259,12 +235,6 @@ class _MainShellState extends State<MainShell> {
             icon: Icons.search_outlined,
             selectedIcon: Icons.search_rounded,
             screen: SearchScreen(),
-          ),
-          _TabItem(
-            label: 'Profile',
-            icon: Icons.person_outline_rounded,
-            selectedIcon: Icons.person_rounded,
-            screen: ProfileScreen(),
           ),
         ];
     }

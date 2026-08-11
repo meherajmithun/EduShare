@@ -9,6 +9,7 @@ import 'package:edushare/models/user_model.dart';
 import 'package:edushare/core/role_helper.dart';
 import 'package:edushare/widgets/glass_card.dart';
 import 'package:edushare/widgets/notification_bell.dart';
+import 'package:edushare/widgets/app_bar_profile_avatar.dart';
 import 'package:edushare/views/course/course_details_screen.dart';
 import 'package:edushare/views/course/watch_history_screen.dart';
 import 'package:edushare/views/upload/upload_resource_screen.dart';
@@ -66,7 +67,9 @@ class _HomeScreenState extends State<HomeScreen> {
       }
 
       setState(() {
-        _departments = depts;
+        _departments = (user != null && (user.isStudent || user.isContributor) && userDept != null)
+            ? [userDept]
+            : depts;
         _allCourses = courses;
         _filteredCourses = courses;
         _selectedDept = userDept;
@@ -115,16 +118,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Row(
-          children: const [
-            Icon(Icons.school_rounded, color: AppTheme.primaryColor, size: 28),
-            SizedBox(width: 10),
-            Text(
-              'EduShare',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-            ),
-          ],
-        ),
+        leadingWidth: 180,
+        leading: const AppBarProfileAvatar(),
         actions: [
           IconButton(
             icon: const Icon(Icons.video_library_rounded),

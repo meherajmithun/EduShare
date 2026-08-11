@@ -31,8 +31,8 @@ const materialSchema = new mongoose.Schema(
     type: {
       type: String,
       enum: {
-        values: ['notes', 'assignment', 'video'],
-        message: 'Type must be notes, assignment, or video',
+        values: ['notes', 'assignment', 'video', 'pdf'],
+        message: 'Type must be notes, assignment, video, or pdf',
       },
       required: [true, 'Material type is required'],
     },
@@ -49,6 +49,26 @@ const materialSchema = new mongoose.Schema(
     // YouTube / Google Drive URL (null for file types)
     videoLink: {
       type: String,
+      default: null,
+    },
+    // Source of video: 'cloudinary' (uploaded file) or 'youtube' (URL)
+    // null for non-video types
+    videoSource: {
+      type: String,
+      enum: {
+        values: ['cloudinary', 'youtube', null],
+        message: 'videoSource must be cloudinary or youtube',
+      },
+      default: null,
+    },
+    // Original filename — useful for PDF display
+    fileName: {
+      type: String,
+      default: null,
+    },
+    // File size in bytes — for display in the app
+    fileSize: {
+      type: Number,
       default: null,
     },
     courseId: {

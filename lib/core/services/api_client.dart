@@ -237,6 +237,22 @@ class ApiClient {
         return MediaType('image', 'png');
       case 'webp':
         return MediaType('image', 'webp');
+      // ─── Video formats ───────────────────────────────────────────────
+      case 'mp4':
+        return MediaType('video', 'mp4');
+      case 'mkv':
+        return MediaType('video', 'x-matroska');
+      case 'mov':
+        return MediaType('video', 'quicktime');
+      case 'avi':
+        return MediaType('video', 'x-msvideo');
+      case 'webm':
+        return MediaType('video', 'webm');
+      case 'mpeg':
+      case 'mpg':
+        return MediaType('video', 'mpeg');
+      case '3gp':
+        return MediaType('video', '3gpp');
       default:
         return MediaType('application', 'octet-stream');
     }

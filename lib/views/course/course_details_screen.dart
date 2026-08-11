@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:youtube_player_flutter/youtube_player_flutter.dart';
 import 'package:edushare/core/theme.dart';
 import 'package:edushare/core/services/firestore_service.dart';
 import 'package:edushare/models/course_model.dart';
@@ -10,6 +9,7 @@ import 'package:edushare/views/profile/contributor_profile_screen.dart';
 import 'package:edushare/views/course/video_details_screen.dart';
 import 'package:edushare/widgets/glass_card.dart';
 import 'package:edushare/widgets/material_rating_sheet.dart';
+import 'package:edushare/widgets/pdf_viewer_screen.dart';
 
 class CourseDetailsScreen extends StatefulWidget {
   final CourseModel course;
@@ -46,10 +46,13 @@ class _CourseDetailsScreenState extends State<CourseDetailsScreen> with SingleTi
   void _loadMaterials() async {
     try {
       final notes = await _firestoreService.getApprovedMaterials(widget.course.id, type: 'notes');
+      final pdfs = await _firestoreService.getApprovedMaterials(widget.course.id, type: 'pdf');
       final assignments = await _firestoreService.getApprovedMaterials(widget.course.id, type: 'assignment');
       final videos = await _firestoreService.getApprovedMaterials(widget.course.id, type: 'video');
-      
-      final allMaterials = [...notes, ...assignments, ...videos];
+
+      // Merge pdf type materials into the notes list for display
+      final allNotes = [...notes, ...pdfs];
+      final allMaterials = [...allNotes, ...assignments, ...videos];
       final uniqueContributorIds = allMaterials.map((m) => m.uploadedBy).toSet();
 
       final profilesMap = <String, ContributorProfileModel>{};
@@ -64,7 +67,7 @@ class _CourseDetailsScreenState extends State<CourseDetailsScreen> with SingleTi
 
       if (mounted) {
         setState(() {
-          _notes = notes;
+          _notes = allNotes;
           _assignments = assignments;
           _videos = videos;
           _contributorProfiles = profilesMap;
@@ -99,40 +102,6 @@ class _CourseDetailsScreenState extends State<CourseDetailsScreen> with SingleTi
     }
   }
 
-  void _playYoutubeVideo(String videoUrl) {
-    final videoId = YoutubePlayer.convertUrlToId(videoUrl);
-    if (videoId == null) {
-      _openUrl(videoUrl);
-      return;
-    }
-
-    // Play in a custom overlay dialog or bottom sheet for high-fidelity!
-    showDialog(
-      context: context,
-      builder: (context) {
-        final YoutubePlayerController controller = YoutubePlayerController(
-          initialVideoId: videoId,
-          flags: const YoutubePlayerFlags(
-            autoPlay: true,
-            mute: false,
-          ),
-        );
-
-        return Dialog(
-          backgroundColor: Colors.black,
-          insetPadding: const EdgeInsets.symmetric(horizontal: 10),
-          child: AspectRatio(
-            aspectRatio: 16 / 9,
-            child: YoutubePlayer(
-              controller: controller,
-              showVideoProgressIndicator: true,
-              progressIndicatorColor: AppTheme.primaryColor,
-            ),
-          ),
-        );
-      },
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -401,7 +370,7 @@ class _CourseDetailsScreenState extends State<CourseDetailsScreen> with SingleTi
                         ),
                         const SizedBox(width: 8),
 
-                        // Open / Play Button
+                         // Open / Play Button
                         ElevatedButton(
                           style: ElevatedButton.styleFrom(
                             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -417,6 +386,16 @@ class _CourseDetailsScreenState extends State<CourseDetailsScreen> with SingleTi
                                     allCourseVideos: _videos,
                                     initialVideo: mat,
                                     courseResources: [..._notes, ..._assignments],
+                                  ),
+                                ),
+                              );
+                            } else if (mat.isPdf && mat.fileUrl != null) {
+                              // Open PDF in-app
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => PdfViewerScreen(
+                                    url: mat.fileUrl!,
+                                    title: mat.title,
                                   ),
                                 ),
                               );

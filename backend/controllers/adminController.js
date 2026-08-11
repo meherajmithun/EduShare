@@ -27,10 +27,21 @@ const { success, createError } = require('../utils/apiResponse');
 
 // ─── GET /api/admin/pending ────────────────────────────────────────────
 const getPendingMaterials = async (req, res) => {
+  if (req.user.role === 'super_admin') {
+    return res.json(success([], 'Super Admin does not review materials.'));
+  }
+
   const filter = { approvalStatus: 'pending' };
 
-  if (req.user.role === 'faculty_admin') {
-    filter.assignedAdmin = req.user._id;
+  if (req.user.role === 'faculty_admin' || req.user.role === 'admin') {
+    if (req.user.department) {
+      filter.$or = [
+        { assignedAdmin: req.user._id },
+        { department: req.user.department }
+      ];
+    } else {
+      filter.assignedAdmin = req.user._id;
+    }
   }
 
   const pending = await Material.find(filter).sort({ createdAt: 1 });
@@ -39,14 +50,18 @@ const getPendingMaterials = async (req, res) => {
 
 // ─── PUT /api/admin/approve/:id ────────────────────────────────────────
 const approveMaterial = async (req, res) => {
+  if (req.user.role === 'super_admin') {
+    throw createError('Access denied. Super Admin cannot approve materials. Only department Admins can review materials.', 403);
+  }
+
   const material = await Material.findById(req.params.id);
   if (!material) throw createError('Material not found.', 404);
 
-  if (
-    req.user.role === 'faculty_admin' &&
-    material.assignedAdmin?.toString() !== req.user._id.toString()
-  ) {
-    throw createError('Access denied. This material is not assigned to you.', 403);
+  const isAssigned = material.assignedAdmin?.toString() === req.user._id.toString();
+  const isSameDept = req.user.department && material.department === req.user.department;
+
+  if (!isAssigned && !isSameDept) {
+    throw createError('Access denied. This material is not in your department.', 403);
   }
 
   if (material.approvalStatus === 'approved') {
@@ -78,16 +93,20 @@ const approveMaterial = async (req, res) => {
 
 // ─── PUT /api/admin/reject/:id ─────────────────────────────────────────
 const rejectMaterial = async (req, res) => {
+  if (req.user.role === 'super_admin') {
+    throw createError('Access denied. Super Admin cannot reject materials. Only department Admins can review materials.', 403);
+  }
+
   const { reason, reviewComment } = req.body;
 
   const material = await Material.findById(req.params.id);
   if (!material) throw createError('Material not found.', 404);
 
-  if (
-    req.user.role === 'faculty_admin' &&
-    material.assignedAdmin?.toString() !== req.user._id.toString()
-  ) {
-    throw createError('Access denied. This material is not assigned to you.', 403);
+  const isAssigned = material.assignedAdmin?.toString() === req.user._id.toString();
+  const isSameDept = req.user.department && material.department === req.user.department;
+
+  if (!isAssigned && !isSameDept) {
+    throw createError('Access denied. This material is not in your department.', 403);
   }
 
   if (material.approvalStatus === 'rejected') {
@@ -121,8 +140,17 @@ const getStats = async (req, res) => {
   let userFilter = {};
 
   if (req.user.role === 'faculty_admin' || req.user.role === 'admin') {
-    matFilter.assignedAdmin = req.user._id;
-    userFilter.department = req.user.department;
+    if (req.user.department) {
+      matFilter = {
+        $or: [
+          { assignedAdmin: req.user._id },
+          { department: req.user.department }
+        ]
+      };
+      userFilter.department = req.user.department;
+    } else {
+      matFilter.assignedAdmin = req.user._id;
+    }
   }
 
   const [totalUsers, totalMaterials, pendingCount, approvedCount, rejectedCount, pendingContributors] =

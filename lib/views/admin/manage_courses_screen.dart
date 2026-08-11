@@ -4,6 +4,8 @@ import 'package:edushare/core/theme.dart';
 import 'package:edushare/core/services/auth_service.dart';
 import 'package:edushare/core/services/firestore_service.dart';
 import 'package:edushare/models/course_model.dart';
+import 'package:edushare/widgets/notification_bell.dart';
+import 'package:edushare/widgets/app_bar_profile_avatar.dart';
 
 /// Manage Courses Screen — for Faculty Admins.
 /// Shows all courses (active + inactive) in their department.
@@ -257,22 +259,15 @@ class _ManageCoursesScreenState extends State<ManageCoursesScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Row(
-          children: [
-            const Icon(Icons.menu_book_rounded, color: AppTheme.primaryColor, size: 26),
-            const SizedBox(width: 10),
-            Text(
-              'Manage Courses',
-              style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-            ),
-          ],
-        ),
+        leadingWidth: 180,
+        leading: const AppBarProfileAvatar(),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             tooltip: 'Refresh',
             onPressed: _loadCourses,
           ),
+          const NotificationBell(),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(

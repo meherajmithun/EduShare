@@ -5,6 +5,8 @@ import 'package:edushare/core/services/firestore_service.dart';
 import 'package:edushare/core/services/auth_service.dart';
 import 'package:edushare/core/role_helper.dart';
 import 'package:edushare/models/user_model.dart';
+import 'package:edushare/widgets/notification_bell.dart';
+import 'package:edushare/widgets/app_bar_profile_avatar.dart';
 import 'package:edushare/views/admin/approvals_screen.dart';
 import 'package:edushare/views/admin/all_materials_screen.dart';
 import 'package:edushare/views/admin/users_screen.dart';
@@ -73,10 +75,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           setState(() {
             _totalUsers = (stats['totalUsers'] as num?)?.toInt() ?? 0;
             _total = (stats['totalMaterials'] as num?)?.toInt() ?? 0;
-            _pending = (stats['pendingCount'] as num?)?.toInt() ?? 0;
+            final matPending = (stats['pendingCount'] as num?)?.toInt() ?? 0;
+            _pendingFacultyAdmins = (stats['pendingContributors'] as num?)?.toInt() ?? 0;
+            // Requirement 5: Combined Pending Reviews = Pending Materials + Pending Contributors
+            _pending = matPending + _pendingFacultyAdmins;
             _approved = (stats['approvedCount'] as num?)?.toInt() ?? 0;
             _rejected = (stats['rejectedCount'] as num?)?.toInt() ?? 0;
-            _pendingFacultyAdmins = (stats['pendingContributors'] as num?)?.toInt() ?? 0;
             _isLoading = false;
           });
         }
@@ -99,23 +103,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Row(
-          children: [
-            const Icon(Icons.dashboard_rounded,
-                color: AppTheme.primaryColor, size: 26),
-            const SizedBox(width: 10),
-            Flexible(
-              child: Text(
-                isSuperAdmin
-                    ? 'Super Admin Dashboard'
-                    : 'Admin Dashboard',
-                style: theme.textTheme.titleLarge
-                    ?.copyWith(fontWeight: FontWeight.bold),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-        ),
+        leadingWidth: 180,
+        leading: const AppBarProfileAvatar(),
+        actions: const [NotificationBell()],
       ),
       body: _isLoading
           ? const Center(
@@ -159,7 +149,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                             isSuperAdmin
                                 ? 'Super Admin Control Panel'
                                 : isFacultyAdmin
-                                    ? 'Faculty Admin — $department'
+                                    ? 'Admin — $department'
                                     : 'Admin Control Panel',
                             style: theme.textTheme.titleLarge?.copyWith(
                               color: Colors.white,
@@ -169,7 +159,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           const SizedBox(height: 4),
                           Text(
                             isSuperAdmin
-                                ? 'Manage Faculty Admins, users, and all academic content.'
+                                ? 'Manage Admins, users, and all academic content.'
                                 : isFacultyAdmin
                                     ? 'Manage materials and users in your department.'
                                     : 'Manage uploads, users and academic content.',

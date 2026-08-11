@@ -8,6 +8,10 @@ import 'package:edushare/core/role_helper.dart';
 import 'package:edushare/models/material_model.dart';
 import 'package:edushare/models/user_model.dart';
 import 'package:edushare/widgets/glass_card.dart';
+import 'package:edushare/widgets/notification_bell.dart';
+import 'package:edushare/widgets/app_bar_profile_avatar.dart';
+import 'package:edushare/widgets/pdf_viewer_screen.dart';
+import 'package:edushare/views/course/video_details_screen.dart';
 
 /// Approval screen for admin-class roles with tabs:
 /// - Tab 0: Materials (pending material uploads)
@@ -77,7 +81,26 @@ class _ApprovalsScreenState extends State<ApprovalsScreen>
   // ── Preview Helper ─────────────────────────────────────────────────────
 
   Future<void> _previewMaterial(MaterialModel mat) async {
-    final urlStr = mat.type == 'video' ? mat.videoLink : mat.fileUrl;
+    if (mat.type == 'video' || mat.isCloudinaryVideo || mat.isYouTube) {
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => VideoDetailsScreen(video: mat)),
+      );
+      return;
+    }
+
+    if (mat.isPdf && mat.fileUrl != null && mat.fileUrl!.isNotEmpty) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => PdfViewerScreen(
+            pdfUrl: mat.fileUrl!,
+            title: mat.title,
+          ),
+        ),
+      );
+      return;
+    }
+
+    final urlStr = mat.fileUrl ?? mat.videoLink;
     if (urlStr == null || urlStr.trim().isEmpty) {
       _showSnack('No link or file available to preview.', const Color(0xFFEF4444));
       return;
@@ -364,11 +387,9 @@ class _ApprovalsScreenState extends State<ApprovalsScreen>
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          isFacultyAdmin ? 'Department Approvals' : 'Pending Approvals',
-          style: theme.textTheme.titleLarge
-              ?.copyWith(fontWeight: FontWeight.bold),
-        ),
+        leadingWidth: 180,
+        leading: const AppBarProfileAvatar(),
+        actions: const [NotificationBell()],
         bottom: TabBar(
           controller: _tabController,
           labelColor: AppTheme.primaryColor,
@@ -430,6 +451,7 @@ class _ApprovalsScreenState extends State<ApprovalsScreen>
                                 mat: mat,
                                 theme: theme,
                                 isProcessing: isProcessing,
+                                isSuperAdmin: currentUser?.isSuperAdmin ?? false,
                                 onPreview: () => _previewMaterial(mat),
                                 onApprove: () => _approveMaterial(mat),
                                 onReject: () => _rejectMaterial(mat),
@@ -509,6 +531,7 @@ class _PendingMaterialCard extends StatelessWidget {
   final MaterialModel mat;
   final ThemeData theme;
   final bool isProcessing;
+  final bool isSuperAdmin;
   final VoidCallback onPreview;
   final VoidCallback onApprove;
   final VoidCallback onReject;
@@ -517,6 +540,7 @@ class _PendingMaterialCard extends StatelessWidget {
     required this.mat,
     required this.theme,
     required this.isProcessing,
+    this.isSuperAdmin = false,
     required this.onPreview,
     required this.onApprove,
     required this.onReject,
@@ -624,6 +648,27 @@ class _PendingMaterialCard extends StatelessWidget {
                 child: CircularProgressIndicator(
                     strokeWidth: 2, color: AppTheme.primaryColor),
               ),
+            )
+          else if (isSuperAdmin)
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppTheme.primaryColor,
+                      side: const BorderSide(color: AppTheme.primaryColor),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                    ),
+                    icon: const Icon(Icons.visibility_outlined, size: 16),
+                    label: const Text('Preview Material',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 12)),
+                    onPressed: onPreview,
+                  ),
+                ),
+              ],
             )
           else
             Row(
@@ -739,7 +784,7 @@ class _PendingContributorCard extends StatelessWidget {
               ),
             ],
           ),
-          if (user.department != null && user.department!.isNotEmpty) ...[
+          if (user.department.isNotEmpty) ...[
             const SizedBox(height: 10),
             Row(
               children: [

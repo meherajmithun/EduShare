@@ -3,6 +3,8 @@ import 'package:edushare/core/theme.dart';
 import 'package:edushare/core/services/firestore_service.dart';
 import 'package:edushare/models/material_model.dart';
 import 'package:edushare/widgets/glass_card.dart';
+import 'package:edushare/widgets/notification_bell.dart';
+import 'package:edushare/widgets/app_bar_profile_avatar.dart';
 
 /// Admin All Materials screen — lists every material across all statuses.
 /// Shows approval audit fields: assigned admin, approved by, rejection reason.
@@ -109,15 +111,15 @@ class _AllMaterialsScreenState extends State<AllMaterialsScreen> {
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(
-        title: Text('All Materials',
-            style: theme.textTheme.titleLarge
-                ?.copyWith(fontWeight: FontWeight.bold)),
+        leadingWidth: 180,
+        leading: const AppBarProfileAvatar(),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             onPressed: _loadMaterials,
             tooltip: 'Refresh',
           ),
+          const NotificationBell(),
         ],
       ),
       body: _isLoading

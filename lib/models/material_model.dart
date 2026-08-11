@@ -6,9 +6,12 @@ class MaterialModel {
   final String id;
   final String title;
   final String description;
-  final String type;            // 'notes' | 'assignment' | 'video'
-  final String? fileUrl;        // Cloudinary secure URL (PDF/image)
-  final String? videoLink;      // YouTube / Google Drive URL
+  final String type;            // 'notes' | 'assignment' | 'video' | 'pdf'
+  final String? fileUrl;        // Cloudinary secure URL (PDF/image/video)
+  final String? videoLink;      // YouTube URL (null for Cloudinary videos)
+  final String? videoSource;    // 'cloudinary' | 'youtube' | null
+  final String? fileName;       // Original filename (for PDF display)
+  final int? fileSize;          // File size in bytes
   final String courseId;
   final String departmentId;
   final String department;      // Denormalised department name
@@ -56,6 +59,9 @@ class MaterialModel {
     required this.type,
     this.fileUrl,
     this.videoLink,
+    this.videoSource,
+    this.fileName,
+    this.fileSize,
     required this.courseId,
     required this.departmentId,
     this.department = '',
@@ -76,6 +82,39 @@ class MaterialModel {
     required this.createdAt,
   });
 
+  // ─── Computed helpers ─────────────────────────────────────────────────
+
+  /// True if this video is stored on YouTube (use YouTube player).
+  bool get isYouTube =>
+      type == 'video' && videoSource == 'youtube' && videoLink != null && videoLink!.isNotEmpty;
+
+  /// True if this video was uploaded to Cloudinary (use native video player).
+  bool get isCloudinaryVideo =>
+      type == 'video' && videoSource == 'cloudinary' && fileUrl != null && fileUrl!.isNotEmpty;
+
+  /// True if this material is a PDF file (in-app PDF viewer).
+  bool get isPdf =>
+      type == 'pdf' ||
+      (fileUrl != null && fileUrl!.toLowerCase().contains('.pdf'));
+
+  /// Playback URL for this video (null if not a valid video material).
+  String? get videoPlaybackUrl {
+    if (isYouTube) return videoLink;
+    if (isCloudinaryVideo) return fileUrl;
+    // Legacy: videoLink might be set for older records without videoSource
+    if (type == 'video' && videoLink != null && videoLink!.isNotEmpty) return videoLink;
+    return null;
+  }
+
+  /// True if this is a legacy YouTube-linked video (no videoSource field set).
+  bool get isLegacyYouTube {
+    if (type != 'video') return false;
+    if (videoSource != null) return false; // Has explicit source, use that
+    if (videoLink == null || videoLink!.isEmpty) return false;
+    final link = videoLink!.toLowerCase();
+    return link.contains('youtube.com') || link.contains('youtu.be');
+  }
+
   // ─── JSON serialisation ───────────────────────────────────────────────
 
   factory MaterialModel.fromJson(Map<String, dynamic> json) {
@@ -86,6 +125,9 @@ class MaterialModel {
       type: json['type'] as String? ?? 'notes',
       fileUrl: json['fileUrl'] as String?,
       videoLink: json['videoLink'] as String?,
+      videoSource: json['videoSource'] as String?,
+      fileName: json['fileName'] as String?,
+      fileSize: (json['fileSize'] as num?)?.toInt(),
       courseId: (json['courseId'] ?? '').toString(),
       departmentId: (json['departmentId'] ?? '').toString(),
       department: json['department'] as String? ?? '',
@@ -125,6 +167,9 @@ class MaterialModel {
       'type': type,
       'fileUrl': fileUrl,
       'videoLink': videoLink,
+      'videoSource': videoSource,
+      'fileName': fileName,
+      'fileSize': fileSize,
       'courseId': courseId,
       'departmentId': departmentId,
       'department': department,

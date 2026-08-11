@@ -9,7 +9,6 @@
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:edushare/core/theme.dart';
 import 'package:edushare/core/services/notification_service.dart';
 import 'package:edushare/views/notifications/notifications_screen.dart';
 

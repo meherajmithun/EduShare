@@ -2,6 +2,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:youtube_player_flutter/youtube_player_flutter.dart';
+import 'package:video_player/video_player.dart';
+import 'package:chewie/chewie.dart';
 import 'package:edushare/core/theme.dart';
 import 'package:edushare/core/services/firestore_service.dart';
 import 'package:edushare/models/course_model.dart';
@@ -11,6 +13,7 @@ import 'package:edushare/models/material_rating_model.dart';
 import 'package:edushare/views/profile/contributor_profile_screen.dart';
 import 'package:edushare/widgets/glass_card.dart';
 import 'package:edushare/widgets/material_rating_sheet.dart';
+import 'package:edushare/widgets/pdf_viewer_screen.dart';
 import 'package:intl/intl.dart';
 
 class VideoDetailsScreen extends StatefulWidget {
@@ -37,7 +40,18 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
   late TabController _tabController;
 
   late MaterialModel _currentVideo;
+
+  // ─── YouTube player ───────────────────────────────────────────────────
   YoutubePlayerController? _youtubeController;
+
+  // ─── Native video player (Cloudinary) ────────────────────────────────
+  VideoPlayerController? _nativeController;
+  ChewieController? _chewieController;
+
+  // ─── Player state ─────────────────────────────────────────────────────
+  bool _playerInitializing = false;
+  bool _playerError = false;
+  String? _playerErrorMsg;
 
   // Video progress state
   Map<String, Map<String, dynamic>> _progressMap = {}; // materialId -> {position, duration, completed}
@@ -80,25 +94,40 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
     }
   }
 
+  // ─── Player initialisation ────────────────────────────────────────────
+
   void _initVideoPlayer(MaterialModel video) {
     _progressSaveTimer?.cancel();
+
+    // Dispose previous controllers
+    _disposeNativeController();
+    _youtubeController?.removeListener(_onYoutubeStateChange);
     _youtubeController?.dispose();
+    _youtubeController = null;
 
-    final videoId = YoutubePlayer.convertUrlToId(video.videoLink ?? '');
-    if (videoId == null) return;
+    setState(() {
+      _playerInitializing = true;
+      _playerError = false;
+      _playerErrorMsg = null;
+    });
 
-    // Get last saved position if available
+    // Get last saved position
     final savedProg = _progressMap[video.id];
     final startPos = (savedProg?['lastPosition'] as num?)?.toInt() ?? 0;
 
-    _youtubeController = YoutubePlayerController(
-      initialVideoId: videoId,
-      flags: YoutubePlayerFlags(
-        autoPlay: true,
-        mute: false,
-        startAt: startPos > 5 ? startPos - 2 : startPos, // slight rewind on resume
-      ),
-    )..addListener(_onPlayerStateChange);
+    // ── Detect source ─────────────────────────────────────────────────
+    if (video.isYouTube || video.isLegacyYouTube) {
+      _initYouTubePlayer(video, startPos);
+    } else if (video.isCloudinaryVideo) {
+      _initNativePlayer(video, startPos);
+    } else {
+      // No valid playback URL
+      setState(() {
+        _playerInitializing = false;
+        _playerError = true;
+        _playerErrorMsg = 'This video has no playable source. The URL may be missing or invalid.';
+      });
+    }
 
     // Save progress every 5 seconds
     _progressSaveTimer = Timer.periodic(const Duration(seconds: 5), (_) {
@@ -106,9 +135,114 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
     });
   }
 
-  void _onPlayerStateChange() {
-    if (_youtubeController == null) return;
+  void _initYouTubePlayer(MaterialModel video, int startPos) {
+    final url = video.isYouTube ? video.videoLink : video.videoPlaybackUrl;
+    final videoId = YoutubePlayer.convertUrlToId(url ?? '');
 
+    if (videoId == null || videoId.isEmpty) {
+      setState(() {
+        _playerInitializing = false;
+        _playerError = true;
+        _playerErrorMsg = 'Could not extract YouTube video ID from the URL.';
+      });
+      return;
+    }
+
+    _youtubeController = YoutubePlayerController(
+      initialVideoId: videoId,
+      flags: YoutubePlayerFlags(
+        autoPlay: true,
+        mute: false,
+        startAt: startPos > 5 ? startPos - 2 : startPos,
+      ),
+    )..addListener(_onYoutubeStateChange);
+
+    setState(() {
+      _playerInitializing = false;
+    });
+  }
+
+  void _initNativePlayer(MaterialModel video, int startPos) async {
+    final url = video.fileUrl;
+    if (url == null || url.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _playerInitializing = false;
+          _playerError = true;
+          _playerErrorMsg = 'Video URL is missing. Please try again.';
+        });
+      }
+      return;
+    }
+
+    try {
+      final controller = VideoPlayerController.networkUrl(Uri.parse(url));
+      await controller.initialize();
+
+      // Seek to last saved position
+      if (startPos > 5) {
+        await controller.seekTo(Duration(seconds: startPos - 2));
+      }
+
+      if (!mounted) {
+        controller.dispose();
+        return;
+      }
+
+      final chewieController = ChewieController(
+        videoPlayerController: controller,
+        autoPlay: true,
+        looping: false,
+        allowFullScreen: true,
+        allowMuting: true,
+        showControls: true,
+        materialProgressColors: ChewieProgressColors(
+          playedColor: AppTheme.primaryColor,
+          handleColor: AppTheme.primaryColor,
+          backgroundColor: AppTheme.primaryColor.withOpacity(0.2),
+          bufferedColor: AppTheme.primaryColor.withOpacity(0.4),
+        ),
+        errorBuilder: (ctx, msg) => _buildPlayerErrorWidget(msg),
+      );
+
+      // Listen for end-of-video
+      controller.addListener(() {
+        if (controller.value.position >= controller.value.duration &&
+            controller.value.duration.inSeconds > 0) {
+          _saveCurrentProgress(forceCompleted: true);
+          if (_autoPlayNext) {
+            _playNextVideo();
+          }
+        }
+      });
+
+      setState(() {
+        _nativeController = controller;
+        _chewieController = chewieController;
+        _playerInitializing = false;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _playerInitializing = false;
+          _playerError = true;
+          _playerErrorMsg = 'Could not load video: ${e.toString()}';
+        });
+      }
+    }
+  }
+
+  void _disposeNativeController() {
+    _chewieController?.dispose();
+    _chewieController = null;
+    _nativeController?.dispose();
+    _nativeController = null;
+  }
+
+  // ─── Player event handlers ────────────────────────────────────────────
+
+  void _onYoutubeStateChange() {
+    if (_youtubeController == null) return;
     final value = _youtubeController!.value;
     if (value.playerState == PlayerState.ended) {
       _saveCurrentProgress(forceCompleted: true);
@@ -118,11 +252,21 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
     }
   }
 
-  void _saveCurrentProgress({bool forceCompleted = false}) {
-    if (_youtubeController == null || !mounted) return;
+  // ─── Progress tracking ────────────────────────────────────────────────
 
-    final pos = _youtubeController!.value.position.inSeconds;
-    final dur = _youtubeController!.metadata.duration.inSeconds;
+  void _saveCurrentProgress({bool forceCompleted = false}) {
+    if (!mounted) return;
+
+    int pos = 0;
+    int dur = 0;
+
+    if (_youtubeController != null) {
+      pos = _youtubeController!.value.position.inSeconds;
+      dur = _youtubeController!.metadata.duration.inSeconds;
+    } else if (_nativeController != null && _nativeController!.value.isInitialized) {
+      pos = _nativeController!.value.position.inSeconds;
+      dur = _nativeController!.value.duration.inSeconds;
+    }
 
     if (pos <= 0 && dur <= 0) return;
 
@@ -169,6 +313,12 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
     _incrementView();
   }
 
+  void _retryPlayer() {
+    _initVideoPlayer(_currentVideo);
+  }
+
+  // ─── Data loading ─────────────────────────────────────────────────────
+
   void _loadCourseProgress() async {
     final list = await _firestoreService.getCourseVideoProgress(widget.course.id);
     if (mounted) {
@@ -190,7 +340,8 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
   void _checkBookmark() async {
     final bookmarks = await _firestoreService.getBookmarks();
     if (mounted) {
-      final isBkmk = bookmarks.any((b) => (b['material']?['_id'] ?? b['material']?['id']) == _currentVideo.id);
+      final isBkmk = bookmarks.any((b) =>
+          (b['material']?['_id'] ?? b['material']?['id']) == _currentVideo.id);
       setState(() {
         _isBookmarked = isBkmk;
       });
@@ -201,7 +352,6 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
     setState(() {
       _isBookmarked = !_isBookmarked;
     });
-
     if (_isBookmarked) {
       await _firestoreService.addBookmark(_currentVideo.id, widget.course.id);
     } else {
@@ -215,7 +365,9 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
       final data = await _firestoreService.getVideoComments(_currentVideo.id);
       if (mounted) {
         setState(() {
-          _comments = data.map((e) => VideoCommentModel.fromJson(e as Map<String, dynamic>)).toList();
+          _comments = data
+              .map((e) => VideoCommentModel.fromJson(e as Map<String, dynamic>))
+              .toList();
           _loadingComments = false;
         });
       }
@@ -227,7 +379,6 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
   void _postComment() async {
     final text = _commentController.text.trim();
     if (text.isEmpty) return;
-
     _commentController.clear();
     try {
       final data = await _firestoreService.addVideoComment(_currentVideo.id, text);
@@ -268,18 +419,21 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
   void dispose() {
     _saveCurrentProgress();
     _progressSaveTimer?.cancel();
+    _youtubeController?.removeListener(_onYoutubeStateChange);
     _youtubeController?.dispose();
+    _disposeNativeController();
     _tabController.dispose();
     _commentController.dispose();
     super.dispose();
   }
+
+  // ─── Build ────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
-    // Progress calculation
     final totalVideos = widget.allCourseVideos.length;
     final completedCount = widget.allCourseVideos
         .where((v) => _progressMap[v.id]?['completed'] == true)
@@ -288,7 +442,10 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.course.code, style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+        title: Text(
+          widget.course.code,
+          style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+        ),
         actions: [
           IconButton(
             icon: Icon(_isBookmarked ? Icons.bookmark_rounded : Icons.bookmark_border_rounded),
@@ -300,24 +457,16 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
       ),
       body: Column(
         children: [
-          // ─── Top Video Player Container ─────────────────────────────────
+          // ─── Video Player ─────────────────────────────────────────────
           AspectRatio(
             aspectRatio: 16 / 9,
             child: Container(
               color: Colors.black,
-              child: _youtubeController != null
-                  ? YoutubePlayer(
-                      controller: _youtubeController!,
-                      showVideoProgressIndicator: true,
-                      progressIndicatorColor: AppTheme.primaryColor,
-                    )
-                  : const Center(
-                      child: CircularProgressIndicator(color: AppTheme.primaryColor),
-                    ),
+              child: _buildPlayerWidget(),
             ),
           ),
 
-          // ─── Header Info & Action Controls ─────────────────────────────
+          // ─── Header + Tabs ────────────────────────────────────────────
           Expanded(
             child: NestedScrollView(
               headerSliverBuilder: (context, innerBoxIsScrolled) {
@@ -337,25 +486,25 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
                           ),
                           const SizedBox(height: 8),
 
-                          // Views, Upload Date, Contributor, Rating
+                          // Views, Date, Rating
                           Row(
                             children: [
                               Icon(Icons.remove_red_eye_outlined, size: 14, color: theme.disabledColor),
                               const SizedBox(width: 4),
                               Text(
                                 '$_viewsCount views',
-                                style: theme.textTheme.bodyMedium?.copyWith(fontSize: 12, color: theme.disabledColor),
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                    fontSize: 12, color: theme.disabledColor),
                               ),
                               const SizedBox(width: 12),
                               Icon(Icons.calendar_today_outlined, size: 14, color: theme.disabledColor),
                               const SizedBox(width: 4),
                               Text(
                                 DateFormat('MMM dd, yyyy').format(_currentVideo.createdAt),
-                                style: theme.textTheme.bodyMedium?.copyWith(fontSize: 12, color: theme.disabledColor),
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                    fontSize: 12, color: theme.disabledColor),
                               ),
                               const Spacer(),
-
-                              // Rate button
                               InkWell(
                                 onTap: () {
                                   MaterialRatingSheet.show(
@@ -392,20 +541,18 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
                           ),
                           const SizedBox(height: 12),
 
-                          // Contributor Badge
+                          // Contributor + Auto-play
                           Row(
                             children: [
                               InkWell(
                                 onTap: () {
                                   if (_currentVideo.uploadedBy.isNotEmpty) {
-                                    Navigator.of(context).push(
-                                      MaterialPageRoute(
-                                        builder: (_) => ContributorProfileScreen(
-                                          contributorId: _currentVideo.uploadedBy,
-                                          contributorName: _currentVideo.contributorName,
-                                        ),
+                                    Navigator.of(context).push(MaterialPageRoute(
+                                      builder: (_) => ContributorProfileScreen(
+                                        contributorId: _currentVideo.uploadedBy,
+                                        contributorName: _currentVideo.contributorName,
                                       ),
-                                    );
+                                    ));
                                   }
                                 },
                                 child: Row(
@@ -417,7 +564,11 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
                                         _currentVideo.contributorName.isNotEmpty
                                             ? _currentVideo.contributorName[0].toUpperCase()
                                             : 'C',
-                                        style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.bold,
+                                        ),
                                       ),
                                     ),
                                     const SizedBox(width: 8),
@@ -432,11 +583,12 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
                                 ),
                               ),
                               const Spacer(),
-
-                              // Auto-play switch
                               Row(
                                 children: [
-                                  Text('Auto-play Next', style: theme.textTheme.bodyMedium?.copyWith(fontSize: 11)),
+                                  Text(
+                                    'Auto-play Next',
+                                    style: theme.textTheme.bodyMedium?.copyWith(fontSize: 11),
+                                  ),
                                   Switch(
                                     value: _autoPlayNext,
                                     onChanged: (val) => setState(() => _autoPlayNext = val),
@@ -468,7 +620,7 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
                     ),
                   ),
 
-                  // ─── Tabs Header ─────────────────────────────────────────
+                  // Tabs Header
                   SliverPersistentHeader(
                     pinned: true,
                     delegate: _SliverTabBarDelegate(
@@ -476,7 +628,9 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
                         controller: _tabController,
                         indicatorColor: AppTheme.primaryColor,
                         labelColor: AppTheme.primaryColor,
-                        unselectedLabelColor: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+                        unselectedLabelColor: isDark
+                            ? AppTheme.darkTextSecondary
+                            : AppTheme.lightTextSecondary,
                         tabs: const [
                           Tab(text: 'Playlist'),
                           Tab(text: 'Comments'),
@@ -505,6 +659,90 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
     );
   }
 
+  // ─── Player widget builder ────────────────────────────────────────────
+
+  Widget _buildPlayerWidget() {
+    // Loading state
+    if (_playerInitializing) {
+      return const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(color: AppTheme.primaryColor),
+            SizedBox(height: 12),
+            Text(
+              'Loading video...',
+              style: TextStyle(color: Colors.white70, fontSize: 13),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Error state
+    if (_playerError) {
+      return _buildPlayerErrorWidget(_playerErrorMsg ?? 'Unknown error');
+    }
+
+    // YouTube player
+    if (_youtubeController != null) {
+      return YoutubePlayer(
+        controller: _youtubeController!,
+        showVideoProgressIndicator: true,
+        progressIndicatorColor: AppTheme.primaryColor,
+      );
+    }
+
+    // Native (Cloudinary) player via Chewie
+    if (_chewieController != null) {
+      return Chewie(controller: _chewieController!);
+    }
+
+    // No player available
+    return _buildPlayerErrorWidget('No video player available.');
+  }
+
+  Widget _buildPlayerErrorWidget(String message) {
+    return Container(
+      color: Colors.black,
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.error_outline_rounded, color: Colors.redAccent, size: 40),
+              const SizedBox(height: 12),
+              Text(
+                'Playback Error',
+                style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                message,
+                style: const TextStyle(color: Colors.white60, fontSize: 12),
+                textAlign: TextAlign.center,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                onPressed: _retryPlayer,
+                icon: const Icon(Icons.refresh_rounded, size: 16),
+                label: const Text('Retry'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primaryColor,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   // ─── 1. Playlist Tab ───────────────────────────────────────────────────
   Widget _buildPlaylistTab(double progressPct, int completedCount, int totalVideos) {
     final theme = Theme.of(context);
@@ -512,7 +750,6 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
 
     return Column(
       children: [
-        // Course Progress Banner
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           color: isDark ? AppTheme.darkCard : AppTheme.lightCard,
@@ -524,7 +761,8 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
                 children: [
                   Text(
                     'Course Progress: $completedCount of $totalVideos completed',
-                    style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold, fontSize: 13),
+                    style: theme.textTheme.bodyMedium
+                        ?.copyWith(fontWeight: FontWeight.bold, fontSize: 13),
                   ),
                   Text(
                     '${(progressPct * 100).toInt()}%',
@@ -548,8 +786,6 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
             ],
           ),
         ),
-
-        // Videos List
         Expanded(
           child: ListView.builder(
             padding: const EdgeInsets.symmetric(vertical: 8),
@@ -560,7 +796,9 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
               final isCompleted = _progressMap[video.id]?['completed'] == true;
 
               return Container(
-                color: isCurrent ? AppTheme.primaryColor.withOpacity(0.1) : Colors.transparent,
+                color: isCurrent
+                    ? AppTheme.primaryColor.withOpacity(0.1)
+                    : Colors.transparent,
                 child: ListTile(
                   leading: Stack(
                     alignment: Alignment.center,
@@ -579,7 +817,9 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
                         child: Icon(
                           isCompleted
                               ? Icons.check_circle_rounded
-                              : (isCurrent ? Icons.play_arrow_rounded : Icons.video_library_outlined),
+                              : (isCurrent
+                                  ? Icons.play_arrow_rounded
+                                  : Icons.video_library_outlined),
                           color: isCompleted
                               ? Colors.green
                               : (isCurrent ? AppTheme.primaryColor : theme.disabledColor),
@@ -597,11 +837,18 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
                   ),
                   subtitle: Text(
                     video.contributorName,
-                    style: theme.textTheme.bodyMedium?.copyWith(fontSize: 11, color: theme.disabledColor),
+                    style: theme.textTheme.bodyMedium
+                        ?.copyWith(fontSize: 11, color: theme.disabledColor),
                   ),
                   trailing: isCurrent
-                      ? const Text('PLAYING',
-                          style: TextStyle(color: AppTheme.primaryColor, fontSize: 10, fontWeight: FontWeight.bold))
+                      ? const Text(
+                          'PLAYING',
+                          style: TextStyle(
+                            color: AppTheme.primaryColor,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        )
                       : null,
                   onTap: () => _switchVideo(video),
                 ),
@@ -623,7 +870,10 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
               ? const Center(child: CircularProgressIndicator(color: AppTheme.primaryColor))
               : _comments.isEmpty
                   ? Center(
-                      child: Text('No comments yet. Start the discussion!', style: theme.textTheme.bodyMedium),
+                      child: Text(
+                        'No comments yet. Start the discussion!',
+                        style: theme.textTheme.bodyMedium,
+                      ),
                     )
                   : ListView.builder(
                       padding: const EdgeInsets.all(16),
@@ -638,10 +888,18 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
                               CircleAvatar(
                                 radius: 16,
                                 backgroundColor: AppTheme.primaryColor,
-                                backgroundImage: c.userPhoto.isNotEmpty ? NetworkImage(c.userPhoto) : null,
+                                backgroundImage: c.userPhoto.isNotEmpty
+                                    ? NetworkImage(c.userPhoto)
+                                    : null,
                                 child: c.userPhoto.isEmpty
-                                    ? Text(c.userName[0].toUpperCase(),
-                                        style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold))
+                                    ? Text(
+                                        c.userName[0].toUpperCase(),
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      )
                                     : null,
                               ),
                               const SizedBox(width: 10),
@@ -652,12 +910,27 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
                                     Row(
                                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                       children: [
-                                        Text(c.userName, style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold, fontSize: 13)),
-                                        Text(DateFormat('MMM d, h:mm a').format(c.createdAt), style: theme.textTheme.bodyMedium?.copyWith(fontSize: 10, color: theme.disabledColor)),
+                                        Text(
+                                          c.userName,
+                                          style: theme.textTheme.bodyMedium?.copyWith(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 13,
+                                          ),
+                                        ),
+                                        Text(
+                                          DateFormat('MMM d, h:mm a').format(c.createdAt),
+                                          style: theme.textTheme.bodyMedium?.copyWith(
+                                            fontSize: 10,
+                                            color: theme.disabledColor,
+                                          ),
+                                        ),
                                       ],
                                     ),
                                     const SizedBox(height: 3),
-                                    Text(c.comment, style: theme.textTheme.bodyMedium?.copyWith(fontSize: 13)),
+                                    Text(
+                                      c.comment,
+                                      style: theme.textTheme.bodyMedium?.copyWith(fontSize: 13),
+                                    ),
                                   ],
                                 ),
                               ),
@@ -667,7 +940,6 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
                       },
                     ),
         ),
-        // Comment input bar
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
@@ -741,12 +1013,18 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Text(r.ratedByName.isNotEmpty ? r.ratedByName : 'Student', style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold)),
+                              Text(
+                                r.ratedByName.isNotEmpty ? r.ratedByName : 'Student',
+                                style: theme.textTheme.bodyMedium
+                                    ?.copyWith(fontWeight: FontWeight.bold),
+                              ),
                               Row(
                                 children: List.generate(
                                   5,
                                   (i) => Icon(
-                                    i < r.stars ? Icons.star_rounded : Icons.star_border_rounded,
+                                    i < r.stars
+                                        ? Icons.star_rounded
+                                        : Icons.star_border_rounded,
                                     color: Colors.amber,
                                     size: 14,
                                   ),
@@ -754,9 +1032,12 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
                               ),
                             ],
                           ),
-                          if (r.review != null && r.review!.isNotEmpty) ...[
+                          if (r.review.isNotEmpty) ...[
                             const SizedBox(height: 6),
-                            Text(r.review!, style: theme.textTheme.bodyMedium?.copyWith(fontSize: 13)),
+                            Text(
+                              r.review,
+                              style: theme.textTheme.bodyMedium?.copyWith(fontSize: 13),
+                            ),
                           ],
                         ],
                       ),
@@ -778,7 +1059,10 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
               children: [
                 Icon(Icons.folder_open_rounded, size: 48, color: theme.disabledColor),
                 const SizedBox(height: 8),
-                Text('No additional slides or PDFs for this course.', style: theme.textTheme.bodyMedium),
+                Text(
+                  'No additional slides or PDFs for this course.',
+                  style: theme.textTheme.bodyMedium,
+                ),
               ],
             ),
           )
@@ -787,6 +1071,7 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
             itemCount: resources.length,
             itemBuilder: (context, index) {
               final mat = resources[index];
+              final isPdf = mat.isPdf;
               return Container(
                 margin: const EdgeInsets.only(bottom: 10),
                 child: GlassCard(
@@ -794,8 +1079,12 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
                   child: Row(
                     children: [
                       Icon(
-                        mat.type == 'assignment' ? Icons.task_rounded : Icons.picture_as_pdf_rounded,
-                        color: AppTheme.primaryColor,
+                        isPdf
+                            ? Icons.picture_as_pdf_rounded
+                            : (mat.type == 'assignment'
+                                ? Icons.task_rounded
+                                : Icons.description_rounded),
+                        color: isPdf ? Colors.redAccent : AppTheme.primaryColor,
                         size: 28,
                       ),
                       const SizedBox(width: 12),
@@ -803,14 +1092,37 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(mat.title, style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold)),
-                            Text('${mat.type.toUpperCase()} • ${mat.contributorName}', style: theme.textTheme.bodyMedium?.copyWith(fontSize: 11, color: theme.disabledColor)),
+                            Text(
+                              mat.title,
+                              style: theme.textTheme.bodyMedium
+                                  ?.copyWith(fontWeight: FontWeight.bold),
+                            ),
+                            Text(
+                              '${mat.type.toUpperCase()} • ${mat.contributorName}',
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                fontSize: 11,
+                                color: theme.disabledColor,
+                              ),
+                            ),
                           ],
                         ),
                       ),
                       ElevatedButton(
-                        style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
-                        onPressed: () => _openUrl(mat.fileUrl),
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        ),
+                        onPressed: () {
+                          if (isPdf && mat.fileUrl != null) {
+                            Navigator.of(context).push(MaterialPageRoute(
+                              builder: (_) => PdfViewerScreen(
+                                url: mat.fileUrl!,
+                                title: mat.title,
+                              ),
+                            ));
+                          } else {
+                            _openUrl(mat.fileUrl);
+                          }
+                        },
                         child: const Text('Open', style: TextStyle(fontSize: 12)),
                       ),
                     ],

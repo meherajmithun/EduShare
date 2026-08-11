@@ -6,6 +6,8 @@ import 'package:edushare/core/services/auth_service.dart';
 import 'package:edushare/core/role_helper.dart';
 import 'package:edushare/models/user_model.dart';
 import 'package:edushare/widgets/glass_card.dart';
+import 'package:edushare/widgets/notification_bell.dart';
+import 'package:edushare/widgets/app_bar_profile_avatar.dart';
 
 /// User management screen for admin-class roles.
 /// Super Admin: sees all roles across system.
@@ -23,13 +25,6 @@ class _UsersScreenState extends State<UsersScreen> {
   List<UserModel> _filtered = [];
   bool _isLoading = true;
   String _filterRole = 'all';
-
-  final _roles = [
-    {'value': 'all', 'label': 'All'},
-    {'value': 'student', 'label': 'Students'},
-    {'value': 'contributor', 'label': 'Contributors'},
-    {'value': 'admin', 'label': 'Admins'},
-  ];
 
   @override
   void initState() {
@@ -83,8 +78,9 @@ class _UsersScreenState extends State<UsersScreen> {
         Provider.of<AuthService>(context, listen: false).currentUser;
     final isSuper = currentUser?.isSuperAdmin ?? false;
 
-    // Non-Super-Admins can ONLY see Students and Contributors
+    // Requirement 3: Always hide super_admin accounts from user lists
     final visibleUsers = _users.where((u) {
+      if (u.role == 'super_admin') return false;
       if (!isSuper) {
         return u.role == 'student' || u.role == 'contributor';
       }
@@ -95,7 +91,7 @@ class _UsersScreenState extends State<UsersScreen> {
       _filtered = visibleUsers;
     } else if (_filterRole == 'admin') {
       _filtered = visibleUsers
-          .where((u) => u.role == 'admin' || u.role == 'faculty_admin' || u.role == 'super_admin')
+          .where((u) => u.role == 'admin' || u.role == 'faculty_admin')
           .toList();
     } else {
       _filtered = visibleUsers.where((u) => u.role == _filterRole).toList();
@@ -173,13 +169,12 @@ class _UsersScreenState extends State<UsersScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('Users',
-            style: theme.textTheme.titleLarge
-                ?.copyWith(fontWeight: FontWeight.bold)),
+        leadingWidth: 180,
+        leading: const AppBarProfileAvatar(),
         actions: [
           if (!_isLoading)
             Padding(
-              padding: const EdgeInsets.only(right: 16),
+              padding: const EdgeInsets.only(right: 8),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
@@ -194,6 +189,7 @@ class _UsersScreenState extends State<UsersScreen> {
                         fontSize: 12)),
               ),
             ),
+          const NotificationBell(),
         ],
       ),
       body: _isLoading
@@ -345,13 +341,21 @@ class _UserCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(user.name,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold, fontSize: 14)),
+                Text(
+                  user.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold, fontSize: 14),
+                ),
                 const SizedBox(height: 2),
-                Text(user.email,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                        fontSize: 11, color: theme.disabledColor)),
+                Text(
+                  user.email,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                      fontSize: 11, color: theme.disabledColor),
+                ),
                 const SizedBox(height: 4),
                 Row(
                   children: [
@@ -364,16 +368,26 @@ class _UserCard extends StatelessWidget {
                         border: Border.all(
                             color: roleColor.withOpacity(0.4)),
                       ),
-                      child: Text(user.roleLabel,
-                          style: TextStyle(
-                              color: roleColor,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 10)),
+                      child: Text(
+                        user.roleLabel,
+                        style: TextStyle(
+                            color: roleColor,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 10),
+                      ),
                     ),
-                    const SizedBox(width: 8),
-                    Text(user.department,
-                        style: theme.textTheme.bodyMedium
-                            ?.copyWith(fontSize: 11)),
+                    if (user.department.isNotEmpty) ...[
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          user.department,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodyMedium
+                              ?.copyWith(fontSize: 11),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ],

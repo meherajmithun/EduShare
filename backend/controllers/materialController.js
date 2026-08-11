@@ -8,6 +8,11 @@
  * Student access: getMaterials is scoped to the student's departmentId.
  * Contributor access: createMaterial validates departmentId matches own department.
  *
+ * Video source logic:
+ *   type === 'video' && videoSource === 'youtube'    → store videoLink, no file upload
+ *   type === 'video' && videoSource === 'cloudinary' → upload req.file as video to Cloudinary
+ *   type === 'pdf' | 'notes' | 'assignment'          → upload req.file as raw to Cloudinary
+ *
  * Material Rating endpoints (students only):
  *   GET    /api/materials/:id/ratings   — all ratings + caller's own rating
  *   POST   /api/materials/:id/ratings   — submit rating (students only)
@@ -19,7 +24,7 @@ const Material = require('../models/Material');
 const MaterialRating = require('../models/MaterialRating');
 const User = require('../models/User');
 const Department = require('../models/Department');
-const { uploadBuffer, deleteFile } = require('../services/cloudinaryService');
+const { uploadBuffer, uploadVideoBuffer, deleteFile } = require('../services/cloudinaryService');
 const { notifyFacultyAdminOnUpload, notifyContributorOnRatingSubmitted, notifyContributorOnRatingUpdated } = require('../services/notificationService');
 const { success, createError } = require('../utils/apiResponse');
 
@@ -77,8 +82,8 @@ const getMaterials = async (req, res) => {
   if (courseId) filter.courseId = courseId;
   if (type) filter.type = type;
 
-  // Department-based access: students only see materials from their dept
-  if (req.user && req.user.role === 'student' && req.user.departmentId) {
+  // Department-based access: students and contributors only see materials from their dept
+  if (req.user && (req.user.role === 'student' || req.user.role === 'contributor') && req.user.departmentId) {
     filter.departmentId = req.user.departmentId.toString();
   }
 
@@ -104,23 +109,39 @@ const getMaterialById = async (req, res) => {
 // ─── POST /api/materials ───────────────────────────────────────────────
 // Contributor uploads material. Automatically assigns the Faculty Admin
 // for the material's department and sends them a notification.
+//
+// Request body fields (multipart/form-data or JSON):
+//   title, description, type, courseId, departmentId
+//   videoSource  — 'youtube' | 'cloudinary'  (only for type === 'video')
+//   videoLink    — YouTube URL               (only for videoSource === 'youtube')
+//   file         — the uploaded file          (for all non-youtube types)
 const createMaterial = async (req, res) => {
-  const { title, description, type, videoLink, courseId, departmentId } = req.body;
+  const { title, description, type, videoLink, videoSource, courseId, departmentId } = req.body;
 
   if (!title || !description || !type || !courseId || !departmentId) {
     throw createError('title, description, type, courseId, and departmentId are required.', 400);
   }
 
-  if (!['notes', 'assignment', 'video'].includes(type)) {
-    throw createError('type must be notes, assignment, or video.', 400);
+  if (!['notes', 'assignment', 'video', 'pdf'].includes(type)) {
+    throw createError('type must be notes, assignment, video, or pdf.', 400);
   }
 
-  if (type !== 'video' && !req.file) {
-    throw createError('A file is required for notes and assignment types.', 400);
-  }
-
-  if (type === 'video' && !videoLink) {
-    throw createError('A video link is required for video type.', 400);
+  // Validate based on type / videoSource combination
+  if (type === 'video') {
+    if (!videoSource || !['youtube', 'cloudinary'].includes(videoSource)) {
+      throw createError('videoSource must be "youtube" or "cloudinary" for video type.', 400);
+    }
+    if (videoSource === 'youtube' && !videoLink) {
+      throw createError('A YouTube URL is required when videoSource is "youtube".', 400);
+    }
+    if (videoSource === 'cloudinary' && !req.file) {
+      throw createError('A video file is required when videoSource is "cloudinary".', 400);
+    }
+  } else {
+    // notes, assignment, pdf — all require a file
+    if (!req.file) {
+      throw createError('A file is required for notes, assignment, and pdf types.', 400);
+    }
   }
 
   // Department access guard: contributors can only upload to their own department
@@ -151,13 +172,31 @@ const createMaterial = async (req, res) => {
     assignedAdminName: facultyAdmin ? facultyAdmin.name : null,
   };
 
+  // ── Handle file upload to Cloudinary ─────────────────────────────────
   if (req.file) {
-    const { url, publicId } = await uploadBuffer(req.file.buffer, 'edushare/materials');
-    materialData.fileUrl = url;
-    materialData.filePublicId = publicId;
+    if (type === 'video' && videoSource === 'cloudinary') {
+      // Upload as video resource type
+      const { url, publicId } = await uploadVideoBuffer(req.file.buffer, 'edushare/videos');
+      materialData.fileUrl = url;
+      materialData.filePublicId = publicId;
+      materialData.videoSource = 'cloudinary';
+    } else {
+      // Upload as raw resource type (PDF, DOC, images)
+      const { url, publicId } = await uploadBuffer(req.file.buffer, 'edushare/materials');
+      materialData.fileUrl = url;
+      materialData.filePublicId = publicId;
+    }
+
+    // Store original filename and size for display
+    materialData.fileName = req.file.originalname || null;
+    materialData.fileSize = req.file.size || null;
   }
 
-  if (videoLink) materialData.videoLink = videoLink;
+  // ── Handle YouTube link ───────────────────────────────────────────────
+  if (type === 'video' && videoSource === 'youtube') {
+    materialData.videoLink = videoLink.trim();
+    materialData.videoSource = 'youtube';
+  }
 
   const material = await Material.create(materialData);
 
@@ -184,8 +223,13 @@ const deleteMaterial = async (req, res) => {
   }
 
   if (material.filePublicId) {
-    const resourceType =
-      material.type === 'notes' || material.type === 'assignment' ? 'raw' : 'image';
+    // Determine the correct resource_type for Cloudinary deletion
+    let resourceType = 'raw'; // default for PDF/doc
+    if (material.type === 'video' && material.videoSource === 'cloudinary') {
+      resourceType = 'video';
+    } else if (['notes', 'assignment', 'pdf'].includes(material.type)) {
+      resourceType = 'raw';
+    }
     await deleteFile(material.filePublicId, resourceType);
   }
 
