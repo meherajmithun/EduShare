@@ -84,13 +84,33 @@ class MaterialModel {
 
   // ─── Computed helpers ─────────────────────────────────────────────────
 
+  /// Extract YouTube Video ID from YouTube link
+  String? get youtubeVideoId {
+    if (videoLink == null || videoLink!.isEmpty) return null;
+    final link = videoLink!.trim();
+    final regExp = RegExp(
+      r'^(?:https?:\/\/)?(?:www\.)?(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})',
+      caseSensitive: false,
+    );
+    final match = regExp.firstMatch(link);
+    return match?.group(1);
+  }
+
   /// True if this video is stored on YouTube (use YouTube player).
-  bool get isYouTube =>
-      type == 'video' && videoSource == 'youtube' && videoLink != null && videoLink!.isNotEmpty;
+  bool get isYouTube {
+    if (type != 'video') return false;
+    if (videoSource == 'youtube') return true;
+    if (isLegacyYouTube) return true;
+    return youtubeVideoId != null;
+  }
 
   /// True if this video was uploaded to Cloudinary (use native video player).
-  bool get isCloudinaryVideo =>
-      type == 'video' && videoSource == 'cloudinary' && fileUrl != null && fileUrl!.isNotEmpty;
+  bool get isCloudinaryVideo {
+    if (type != 'video') return false;
+    if (videoSource == 'cloudinary') return true;
+    if (!isYouTube && fileUrl != null && fileUrl!.isNotEmpty) return true;
+    return false;
+  }
 
   /// True if this material is a PDF file (in-app PDF viewer).
   bool get isPdf =>
@@ -101,18 +121,53 @@ class MaterialModel {
   String? get videoPlaybackUrl {
     if (isYouTube) return videoLink;
     if (isCloudinaryVideo) return fileUrl;
-    // Legacy: videoLink might be set for older records without videoSource
     if (type == 'video' && videoLink != null && videoLink!.isNotEmpty) return videoLink;
+    if (type == 'video' && fileUrl != null && fileUrl!.isNotEmpty) return fileUrl;
     return null;
   }
 
   /// True if this is a legacy YouTube-linked video (no videoSource field set).
   bool get isLegacyYouTube {
     if (type != 'video') return false;
-    if (videoSource != null) return false; // Has explicit source, use that
     if (videoLink == null || videoLink!.isEmpty) return false;
     final link = videoLink!.toLowerCase();
     return link.contains('youtube.com') || link.contains('youtu.be');
+  }
+
+  /// Computed cover thumbnail URL for cards & preview lists.
+  String get computedThumbnailUrl {
+    // 1. YouTube video thumbnail
+    final ytId = youtubeVideoId;
+    if (ytId != null && ytId.isNotEmpty) {
+      return 'https://img.youtube.com/vi/$ytId/hqdefault.jpg';
+    }
+
+    // 2. Cloudinary video / PDF poster frame
+    if (fileUrl != null && fileUrl!.isNotEmpty) {
+      final url = fileUrl!;
+      if (url.contains('cloudinary.com')) {
+        if (type == 'video' || url.contains('/video/upload/')) {
+          return url.replaceAll(RegExp(r'\.[a-zA-Z0-9]+$'), '.jpg');
+        }
+        if (isPdf || url.contains('/raw/upload/') || url.contains('/image/upload/')) {
+          return url.replaceAll(RegExp(r'\.pdf$', caseSensitive: false), '.jpg');
+        }
+      }
+    }
+
+    // 3. Fallback high-quality curated cover images based on type
+    switch (type.toLowerCase()) {
+      case 'video':
+        return 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=500&auto=format&fit=crop&q=80';
+      case 'pdf':
+        return 'https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?w=500&auto=format&fit=crop&q=80';
+      case 'notes':
+        return 'https://images.unsplash.com/photo-1517842645767-c639042777db?w=500&auto=format&fit=crop&q=80';
+      case 'assignment':
+        return 'https://images.unsplash.com/photo-1434030216411-0b793f4b4173?w=500&auto=format&fit=crop&q=80';
+      default:
+        return 'https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?w=500&auto=format&fit=crop&q=80';
+    }
   }
 
   // ─── JSON serialisation ───────────────────────────────────────────────

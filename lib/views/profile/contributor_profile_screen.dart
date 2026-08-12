@@ -18,10 +18,13 @@ import 'package:edushare/core/services/auth_service.dart';
 import 'package:edushare/core/services/firestore_service.dart';
 import 'package:edushare/core/role_helper.dart';
 import 'package:edushare/models/contributor_profile_model.dart';
+import 'package:edushare/models/course_model.dart';
 import 'package:edushare/models/material_model.dart';
 import 'package:edushare/models/rating_model.dart';
 import 'package:edushare/models/user_model.dart';
+import 'package:edushare/views/course/video_details_screen.dart';
 import 'package:edushare/widgets/glass_card.dart';
+import 'package:edushare/widgets/pdf_viewer_screen.dart';
 
 class ContributorProfileScreen extends StatefulWidget {
   final String contributorId;
@@ -288,14 +291,40 @@ class _ContributorProfileScreenState extends State<ContributorProfileScreen>
 
   // ── Material action launcher ───────────────────────────────────────────────
   Future<void> _launchMaterial(MaterialModel m) async {
-    if (m.type == 'video') {
-      if (m.videoLink != null) {
-        final uri = Uri.parse(m.videoLink!);
-        if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (m.type == 'video' || m.videoPlaybackUrl != null || m.isYouTube || m.isCloudinaryVideo) {
+      final course = CourseModel(
+        id: m.courseId.isNotEmpty ? m.courseId : 'general',
+        name: m.department.isNotEmpty ? m.department : 'Academic Video',
+        code: 'VIDEO',
+        departmentId: m.departmentId.isNotEmpty ? m.departmentId : 'dept',
+      );
+      if (mounted) {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => VideoDetailsScreen(
+              course: course,
+              allCourseVideos: [m],
+              initialVideo: m,
+            ),
+          ),
+        );
+      }
+    } else if (m.isPdf && m.fileUrl != null && m.fileUrl!.isNotEmpty) {
+      if (mounted) {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => PdfViewerScreen(
+              url: m.fileUrl!,
+              title: m.title,
+            ),
+          ),
+        );
       }
     } else if (m.fileUrl != null && m.fileUrl!.isNotEmpty) {
       final uri = Uri.parse(m.fileUrl!);
-      if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      }
     }
   }
 
@@ -851,32 +880,61 @@ class _TopResourceCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Preview box + Badge
+            // Cover Thumbnail Box + Badges & Overlay
             Expanded(
-              child: Container(
-                width: double.infinity,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(10),
-                  gradient: LinearGradient(
-                    colors: [
-                      AppTheme.primaryColor.withOpacity(0.3),
-                      AppTheme.primaryDark.withOpacity(0.6),
-                    ],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(10),
                 child: Stack(
+                  fit: StackFit.expand,
                   children: [
-                    Center(
-                      child: Icon(
-                        material.type == 'video'
-                            ? Icons.play_circle_fill_rounded
-                            : Icons.description_rounded,
-                        color: Colors.white.withOpacity(0.8),
-                        size: 32,
+                    // Background Cover Image
+                    Image.network(
+                      material.computedThumbnailUrl,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              AppTheme.primaryColor.withOpacity(0.4),
+                              AppTheme.primaryDark.withOpacity(0.8),
+                            ],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                        ),
                       ),
                     ),
+                    // Dark Gradient Overlay
+                    Container(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            Colors.black.withOpacity(0.2),
+                            Colors.black.withOpacity(0.6),
+                          ],
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                        ),
+                      ),
+                    ),
+                    // Center Play / Document Button
+                    Center(
+                      child: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.45),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          material.type == 'video'
+                              ? Icons.play_arrow_rounded
+                              : Icons.description_rounded,
+                          color: Colors.white,
+                          size: material.type == 'video' ? 24 : 20,
+                        ),
+                      ),
+                    ),
+                    // Material Type Badge
                     Positioned(
                       top: 6,
                       left: 6,
@@ -1118,15 +1176,37 @@ class _MaterialCard extends StatelessWidget {
         padding: const EdgeInsets.all(12),
         child: Row(
           children: [
-            // Type icon
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: _typeColor.withOpacity(0.12),
-                borderRadius: BorderRadius.circular(10),
+            // Cover Image Thumbnail
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: SizedBox(
+                width: 48,
+                height: 48,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Image.network(
+                      material.computedThumbnailUrl,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Container(
+                        color: _typeColor.withOpacity(0.12),
+                        child: Icon(_typeIcon, color: _typeColor, size: 22),
+                      ),
+                    ),
+                    if (material.type == 'video')
+                      Container(
+                        color: Colors.black.withOpacity(0.3),
+                        child: const Center(
+                          child: Icon(
+                            Icons.play_arrow_rounded,
+                            color: Colors.white,
+                            size: 20,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
               ),
-              child: Icon(_typeIcon, color: _typeColor, size: 22),
             ),
             const SizedBox(width: 12),
             // Title + meta
