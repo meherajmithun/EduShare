@@ -342,291 +342,399 @@ class _ContributorProfileScreenState extends State<ContributorProfileScreen>
       ThemeData theme, UserModel? currentUser, bool isStudent, bool isDark) {
     final profile = _profile!;
 
-    // Sorted materials for each tab
     final topResources = [..._materials]
       ..sort((a, b) => b.views.compareTo(a.views));
     final recentUploads = [..._materials]
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
-    return NestedScrollView(
-      headerSliverBuilder: (context, innerBoxScrolled) => [
-        SliverToBoxAdapter(
-          child: Column(
-            children: [
-              // ── Custom AppBar ─────────────────────────────────────────
-              SafeArea(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
-                  child: Row(
-                    children: [
-                      IconButton(
-                        icon: Container(
-                          width: 36,
-                          height: 36,
-                          decoration: BoxDecoration(
-                            color: isDark ? AppTheme.darkSurface : AppTheme.lightCard,
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(Icons.arrow_back_ios_new_rounded, size: 16),
-                        ),
-                        onPressed: () => Navigator.of(context).pop(),
-                      ),
-                      Expanded(
-                        child: Column(
-                          children: [
-                            Text(
-                              'CONTRIBUTOR PROFILE',
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                fontSize: 10,
-                                letterSpacing: 1.4,
-                                fontWeight: FontWeight.w600,
-                                color: AppTheme.primaryColor,
-                              ),
-                            ),
-                            Text(
-                              profile.name,
-                              style: theme.textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 15,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
+    return SingleChildScrollView(
+      physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.only(bottom: 32),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Custom AppBar ─────────────────────────────────────────
+          SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  IconButton(
+                    icon: Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: isDark ? AppTheme.darkSurface : AppTheme.lightCard,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
                         ),
                       ),
-                      // Share button
-                      IconButton(
-                        icon: Container(
-                          width: 36,
-                          height: 36,
-                          decoration: BoxDecoration(
-                            color: isDark ? AppTheme.darkSurface : AppTheme.lightCard,
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(Icons.share_rounded, size: 18),
-                        ),
-                        onPressed: () {
-                          Clipboard.setData(ClipboardData(
-                            text: 'Check out ${profile.name}\'s profile on EduShare!',
-                          ));
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Profile link copied!')),
-                          );
-                        },
-                      ),
-                    ],
+                      child: const Icon(Icons.arrow_back_ios_new_rounded, size: 16),
+                    ),
+                    onPressed: () => Navigator.of(context).pop(),
                   ),
-                ),
+                  Text(
+                    'CONTRIBUTOR PROFILE',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontSize: 12,
+                      letterSpacing: 1.5,
+                      fontWeight: FontWeight.bold,
+                      color: AppTheme.darkTextSecondary,
+                    ),
+                  ),
+                  IconButton(
+                    icon: Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: isDark ? AppTheme.darkSurface : AppTheme.lightCard,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
+                        ),
+                      ),
+                      child: const Icon(Icons.share_rounded, size: 18),
+                    ),
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(
+                        text: 'Check out ${profile.name}\'s profile on EduShare!',
+                      ));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Profile link copied!')),
+                      );
+                    },
+                  ),
+                ],
               ),
+            ),
+          ),
 
-              const SizedBox(height: 16),
+          const SizedBox(height: 16),
 
-              // ── Profile Header Card ───────────────────────────────────
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: GlassCard(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
+          // ── Profile Hero Header Card ─────────────────────────────
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: GlassCard(
+              padding: const EdgeInsets.all(18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Avatar with checkmark badge + Follow button on top right
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Avatar + follow
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      // Avatar with verified badge
+                      Stack(
                         children: [
                           _buildAvatar(profile),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                // Name + verified badge
-                                Row(
-                                  children: [
-                                    Flexible(
-                                      child: Text(
-                                        profile.name,
-                                        style: theme.textTheme.titleMedium?.copyWith(
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 17,
-                                        ),
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                    if (profile.isVerified) ...[
-                                      const SizedBox(width: 6),
-                                      const _VerifiedBadge(),
-                                    ],
-                                  ],
+                          if (profile.isVerified)
+                            Positioned(
+                              right: 0,
+                              bottom: 0,
+                              child: Container(
+                                padding: const EdgeInsets.all(2),
+                                decoration: const BoxDecoration(
+                                  color: Colors.white,
+                                  shape: BoxShape.circle,
                                 ),
-                                const SizedBox(height: 4),
-                                // Designation or department
-                                Text(
-                                  profile.designation.isNotEmpty
-                                      ? profile.designation
-                                      : profile.department,
-                                  style: theme.textTheme.bodyMedium?.copyWith(fontSize: 12),
-                                  overflow: TextOverflow.ellipsis,
+                                child: const Icon(
+                                  Icons.check_circle_rounded,
+                                  color: Color(0xFF3B82F6),
+                                  size: 18,
                                 ),
-                                const SizedBox(height: 8),
-                                // Follow / Rate buttons
-                                Row(
-                                  children: [
-                                    if (isStudent) ...[
-                                      _FollowButton(
-                                        isFollowing: profile.isFollowing,
-                                        isLoading: _isFollowLoading,
-                                        onTap: _toggleFollow,
-                                      ),
-                                      const SizedBox(width: 8),
-                                    ],
-                                    _RateButton(
-                                      myRating: _myRating,
-                                      isStudent: isStudent,
-                                      onTap: () => _showRatingDialog(
-                                          isEditing: _myRating != null),
-                                    ),
-                                  ],
-                                ),
-                              ],
+                              ),
                             ),
+                        ],
+                      ),
+                      // Follow & Rate buttons
+                      Row(
+                        children: [
+                          if (isStudent) ...[
+                            _FollowButton(
+                              isFollowing: profile.isFollowing,
+                              isLoading: _isFollowLoading,
+                              onTap: _toggleFollow,
+                            ),
+                            const SizedBox(width: 8),
+                          ],
+                          _RateButton(
+                            myRating: _myRating,
+                            isStudent: isStudent,
+                            onTap: () => _showRatingDialog(
+                                isEditing: _myRating != null),
                           ),
                         ],
                       ),
-
-                      // Bio
-                      if (profile.bio.isNotEmpty) ...[
-                        const SizedBox(height: 14),
-                        const Divider(height: 1),
-                        const SizedBox(height: 14),
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            profile.bio,
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              fontSize: 13,
-                              height: 1.6,
-                            ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  // Name + PRO badge
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          profile.name,
+                          style: theme.textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 20,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primaryColor.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: const Text(
+                          'PRO',
+                          style: TextStyle(
+                            color: AppTheme.primaryColor,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
-                      ],
+                      ),
                     ],
                   ),
-                ),
-              ),
-
-              const SizedBox(height: 16),
-
-              // ── Stats Row ─────────────────────────────────────────────
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: GlassCard(
-                  padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  const SizedBox(height: 6),
+                  // Department / University subtitle
+                  Row(
                     children: [
-                      _StatCell(
-                        label: 'Rating',
-                        value: profile.avgRating.toStringAsFixed(1),
-                        icon: Icons.star_rounded,
-                        iconColor: const Color(0xFFF59E0B),
+                      const Icon(Icons.account_balance_rounded,
+                          size: 14, color: AppTheme.primaryColor),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          profile.department.isNotEmpty
+                              ? profile.department
+                              : 'Dept. of Computer Science',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontSize: 12,
+                            color: AppTheme.primaryColor,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
-                      _vDivider(),
-                      _StatCell(
-                          label: 'Reviews', value: '${profile.totalRatings}'),
-                      _vDivider(),
-                      _StatCell(
-                          label: 'Uploads', value: '${profile.approvedUploads}'),
-                      _vDivider(),
-                      _StatCell(
-                        label: 'Downloads',
-                        value: _formatCount(profile.totalDownloads),
-                      ),
-                      _vDivider(),
-                      _StatCell(
-                          label: 'Followers', value: '${profile.followerCount}'),
-                      _vDivider(),
-                      _StatCell(
-                          label: 'Following', value: '${profile.followingCount}'),
                     ],
                   ),
-                ),
+                  if (profile.bio.isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    Text(
+                      profile.bio,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontSize: 12,
+                        height: 1.5,
+                      ),
+                    ),
+                  ],
+                ],
               ),
+            ),
+          ),
 
-              const SizedBox(height: 16),
+          const SizedBox(height: 16),
 
-              // ── Tab Bar ───────────────────────────────────────────────
-              Container(
-                margin: const EdgeInsets.symmetric(horizontal: 16),
-                decoration: BoxDecoration(
-                  color: isDark ? AppTheme.darkSurface : AppTheme.lightCard,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: TabBar(
-                  controller: _tabController,
-                  labelColor: Colors.white,
-                  unselectedLabelColor: theme.textTheme.bodyMedium?.color,
-                  labelStyle: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12,
-                    letterSpacing: 0.8,
+          // ── Rating Summary Glass Card ──────────────────────────────
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: GlassCard(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  // Large Score
+                  Text(
+                    profile.avgRating.toStringAsFixed(1),
+                    style: theme.textTheme.displaySmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 32,
+                    ),
                   ),
-                  indicator: BoxDecoration(
-                    color: AppTheme.primaryColor,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  indicatorSize: TabBarIndicatorSize.tab,
-                  tabs: [
-                    const Tab(text: 'TOP RESOURCES'),
-                    Tab(
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Text(
-                            'RECENT UPLOADS',
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                  const SizedBox(width: 12),
+                  // Stars + Label
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: List.generate(
+                          5,
+                          (i) => Icon(
+                            i < profile.avgRating.floor()
+                                ? Icons.star_rounded
+                                : (i < profile.avgRating
+                                    ? Icons.star_half_rounded
+                                    : Icons.star_outline_rounded),
+                            color: const Color(0xFFF59E0B),
+                            size: 16,
                           ),
-                          if (_ratings.isNotEmpty) ...[
-                            const SizedBox(width: 4),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 1),
-                              decoration: BoxDecoration(
-                                color: AppTheme.accentColor,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Text(
-                                '${_ratings.length}',
-                                style: const TextStyle(
-                                    color: Colors.white, fontSize: 9),
-                              ),
-                            ),
-                          ],
-                        ],
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Average Rating',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontSize: 10,
+                          color: theme.disabledColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(width: 12),
+                  // Divider
+                  Container(height: 36, width: 1, color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder),
+                  const SizedBox(width: 12),
+                  // Description
+                  Expanded(
+                    child: Text(
+                      'Based on ${profile.totalRatings} student reviews across all uploaded study materials.',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontSize: 10,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // ── 4 Stats Row ───────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: _MetricCard(
+                    label: 'Uploads',
+                    value: '${profile.approvedUploads}',
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _MetricCard(
+                    label: 'Downloads',
+                    value: _formatCount(profile.totalDownloads),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _MetricCard(
+                    label: 'Followers',
+                    value: _formatCount(profile.followerCount),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _MetricCard(
+                    label: 'Following',
+                    value: '${profile.followingCount}',
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 24),
+
+          // ── TOP RESOURCES ────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.star_rounded,
+                        color: Color(0xFFF59E0B), size: 16),
+                    const SizedBox(width: 6),
+                    Text(
+                      'TOP RESOURCES',
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        letterSpacing: 1.2,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
                   ],
                 ),
+                Text(
+                  'View All',
+                  style: TextStyle(
+                    color: AppTheme.primaryColor,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (topResources.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Text(
+                'No approved resources yet.',
+                style: theme.textTheme.bodyMedium?.copyWith(fontSize: 12),
               ),
+            )
+          else
+            SizedBox(
+              height: 180,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                itemCount: topResources.take(6).length,
+                separatorBuilder: (_, __) => const SizedBox(width: 12),
+                itemBuilder: (context, i) => _TopResourceCard(
+                  material: topResources[i],
+                  onTap: () => _launchMaterial(topResources[i]),
+                ),
+              ),
+            ),
 
-              const SizedBox(height: 8),
-            ],
+          const SizedBox(height: 24),
+
+          // ── RECENT UPLOADS ──────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Text(
+              'RECENT UPLOADS',
+              style: theme.textTheme.labelLarge?.copyWith(
+                letterSpacing: 1.2,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
           ),
-        ),
-      ],
-      body: TabBarView(
-        controller: _tabController,
-        children: [
-          // ── TOP RESOURCES ─────────────────────────────────────────────
-          _MaterialList(
-            materials: topResources.take(8).toList(),
-            emptyMessage: 'No approved resources yet.',
-            onTap: _launchMaterial,
-          ),
-          // ── RECENT UPLOADS ────────────────────────────────────────────
-          _MaterialList(
-            materials: recentUploads.take(10).toList(),
-            emptyMessage: 'No resources uploaded yet.',
-            onTap: _launchMaterial,
-          ),
+          const SizedBox(height: 12),
+          if (recentUploads.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Text(
+                'No resources uploaded yet.',
+                style: theme.textTheme.bodyMedium?.copyWith(fontSize: 12),
+              ),
+            )
+          else
+            ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              itemCount: recentUploads.take(6).length,
+              separatorBuilder: (_, __) => const SizedBox(width: 10),
+              itemBuilder: (context, i) => _MaterialCard(
+                material: recentUploads[i],
+                onTap: () => _launchMaterial(recentUploads[i]),
+              ),
+            ),
         ],
       ),
     );
@@ -669,10 +777,6 @@ class _ContributorProfileScreenState extends State<ContributorProfileScreen>
     );
   }
 
-  Widget _vDivider() {
-    return Container(height: 28, width: 1, color: AppTheme.darkBorder);
-  }
-
   static String _formatCount(int n) {
     if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M';
     if (n >= 1000) return '${(n / 1000).toStringAsFixed(1)}K';
@@ -680,39 +784,179 @@ class _ContributorProfileScreenState extends State<ContributorProfileScreen>
   }
 }
 
-// ─── Verified Badge ───────────────────────────────────────────────────────────
-class _VerifiedBadge extends StatelessWidget {
-  const _VerifiedBadge();
+// ─── Metric Card ─────────────────────────────────────────────────────────────
+class _MetricCard extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _MetricCard({required this.label, required this.value});
+
   @override
   Widget build(BuildContext context) {
-    return Tooltip(
-      message: 'Verified Contributor (≥4.0 rating)',
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [Color(0xFF10B981), Color(0xFF059669)],
+    final theme = Theme.of(context);
+
+    return GlassCard(
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+      child: Column(
+        children: [
+          Text(
+            label,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              fontSize: 10,
+              color: theme.disabledColor,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
-          borderRadius: BorderRadius.circular(6),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.bold,
+              fontSize: 15,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Top Resource Card ────────────────────────────────────────────────────────
+class _TopResourceCard extends StatelessWidget {
+  final MaterialModel material;
+  final VoidCallback onTap;
+
+  const _TopResourceCard({required this.material, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 170,
+        decoration: BoxDecoration(
+          color: isDark ? AppTheme.darkSurface : AppTheme.lightCard,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
+          ),
         ),
-        child: const Row(
-          mainAxisSize: MainAxisSize.min,
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(Icons.verified_rounded, color: Colors.white, size: 10),
-            SizedBox(width: 2),
-            Text(
-              'VERIFIED',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 8,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 0.5,
+            // Preview box + Badge
+            Expanded(
+              child: Container(
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(10),
+                  gradient: LinearGradient(
+                    colors: [
+                      AppTheme.primaryColor.withOpacity(0.3),
+                      AppTheme.primaryDark.withOpacity(0.6),
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                ),
+                child: Stack(
+                  children: [
+                    Center(
+                      child: Icon(
+                        material.type == 'video'
+                            ? Icons.play_circle_fill_rounded
+                            : Icons.description_rounded,
+                        color: Colors.white.withOpacity(0.8),
+                        size: 32,
+                      ),
+                    ),
+                    Positioned(
+                      top: 6,
+                      left: 6,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primaryColor,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          material.type.toUpperCase(),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
+            ),
+            const SizedBox(height: 8),
+            // Title
+            Text(
+              material.title,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+                fontSize: 12,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 6),
+            // Footer: views + rating
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.download_rounded,
+                        size: 11, color: AppTheme.darkTextSecondary),
+                    const SizedBox(width: 2),
+                    Text(
+                      _formatCount(material.views),
+                      style: const TextStyle(
+                        fontSize: 10,
+                        color: AppTheme.darkTextSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+                Row(
+                  children: [
+                    const Icon(Icons.star_rounded,
+                        size: 11, color: Color(0xFFF59E0B)),
+                    const SizedBox(width: 2),
+                    Text(
+                      material.avgRating.toStringAsFixed(1),
+                      style: const TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFFF59E0B),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ),
           ],
         ),
       ),
     );
+  }
+
+  static String _formatCount(int n) {
+    if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M';
+    if (n >= 1000) return '${(n / 1000).toStringAsFixed(1)}K';
+    return '$n';
   }
 }
 
@@ -786,7 +1030,7 @@ class _RateButton extends StatelessWidget {
   final VoidCallback onTap;
 
   const _RateButton({
-    required this.myRating,
+    this.myRating,
     required this.isStudent,
     required this.onTap,
   });
@@ -818,97 +1062,6 @@ class _RateButton extends StatelessWidget {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-// ─── Stat Cell ────────────────────────────────────────────────────────────────
-class _StatCell extends StatelessWidget {
-  final String label;
-  final String value;
-  final IconData? icon;
-  final Color? iconColor;
-
-  const _StatCell({
-    required this.label,
-    required this.value,
-    this.icon,
-    this.iconColor,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (icon != null) ...[
-              Icon(icon, size: 13, color: iconColor),
-              const SizedBox(width: 2),
-            ],
-            Text(
-              value,
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-                fontSize: 15,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 2),
-        Text(
-          label,
-          style: theme.textTheme.bodyMedium?.copyWith(fontSize: 10),
-        ),
-      ],
-    );
-  }
-}
-
-// ─── Material List (Scrollable) ───────────────────────────────────────────────
-class _MaterialList extends StatelessWidget {
-  final List<MaterialModel> materials;
-  final String emptyMessage;
-  final Future<void> Function(MaterialModel) onTap;
-
-  const _MaterialList({
-    required this.materials,
-    required this.emptyMessage,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    if (materials.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.folder_open_rounded,
-                  size: 48, color: Theme.of(context).disabledColor),
-              const SizedBox(height: 12),
-              Text(emptyMessage,
-                  style: Theme.of(context).textTheme.bodyMedium,
-                  textAlign: TextAlign.center),
-            ],
-          ),
-        ),
-      );
-    }
-
-    return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-      itemCount: materials.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 10),
-      itemBuilder: (context, i) => _MaterialCard(
-        material: materials[i],
-        onTap: () => onTap(materials[i]),
       ),
     );
   }
