@@ -84,6 +84,9 @@ class MaterialModel {
 
   // ─── Computed helpers ─────────────────────────────────────────────────
 
+  /// True if this material has been approved by admin.
+  bool get isApproved => approvalStatus == 'approved' || status == 'approved';
+
   /// Extract YouTube Video ID from YouTube link
   String? get youtubeVideoId {
     if (videoLink == null || videoLink!.isEmpty) return null;

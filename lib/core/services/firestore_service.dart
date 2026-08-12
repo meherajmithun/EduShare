@@ -120,6 +120,16 @@ class FirestoreService {
     return data.map((e) => MaterialModel.fromJson(e as Map<String, dynamic>)).toList();
   }
 
+  /// Fetch all approved materials across courses
+  Future<List<MaterialModel>> getMaterials() async {
+    try {
+      final data = await _api.get('/api/materials') as List<dynamic>;
+      return data.map((e) => MaterialModel.fromJson(e as Map<String, dynamic>)).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
   // ─── Materials — admin ────────────────────────────────────────────────
 
   Future<List<MaterialModel>> getAllMaterials({String? status}) async {
