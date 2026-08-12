@@ -12,7 +12,8 @@ import 'package:edushare/widgets/custom_textfield.dart';
 
 class UploadResourceScreen extends StatefulWidget {
   final VoidCallback? onUploadSuccess;
-  const UploadResourceScreen({Key? key, this.onUploadSuccess}) : super(key: key);
+  final String? initialType; // 'pdf' | 'video' | 'notes' | 'assignment'
+  const UploadResourceScreen({Key? key, this.onUploadSuccess, this.initialType}) : super(key: key);
 
   @override
   State<UploadResourceScreen> createState() => _UploadResourceScreenState();
@@ -42,6 +43,9 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
   @override
   void initState() {
     super.initState();
+    if (widget.initialType != null) {
+      _selectedType = widget.initialType!;
+    }
     _loadCourses();
   }
 

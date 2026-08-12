@@ -73,6 +73,8 @@ const notificationSchema = new mongoose.Schema(
           'contributor_rejected',
           'rating_submitted',
           'rating_updated',
+          'download_milestone',   // Contributor reaches download milestone
+          'new_follower',         // Contributor gets a new follower
         ],
         message: 'Invalid notification type',
       },
@@ -89,6 +91,12 @@ const notificationSchema = new mongoose.Schema(
       type: String,
       default: null,
       trim: true,
+    },
+
+    // Optional reference to a related entity (e.g. follower userId for new_follower)
+    relatedEntityId: {
+      type: String,
+      default: null,
     },
 
     isRead: {

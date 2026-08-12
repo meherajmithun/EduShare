@@ -5,6 +5,7 @@ import 'package:edushare/core/theme.dart';
 import 'package:edushare/core/services/firestore_service.dart';
 import 'package:edushare/core/services/auth_service.dart';
 import 'package:edushare/core/role_helper.dart';
+import 'package:edushare/models/course_model.dart';
 import 'package:edushare/models/material_model.dart';
 import 'package:edushare/models/user_model.dart';
 import 'package:edushare/widgets/glass_card.dart';
@@ -82,8 +83,20 @@ class _ApprovalsScreenState extends State<ApprovalsScreen>
 
   Future<void> _previewMaterial(MaterialModel mat) async {
     if (mat.type == 'video' || mat.isCloudinaryVideo || mat.isYouTube) {
+      final dummyCourse = CourseModel(
+        id: mat.courseId,
+        code: mat.department,
+        name: mat.title,
+        departmentId: mat.departmentId ?? '',
+      );
       Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => VideoDetailsScreen(video: mat)),
+        MaterialPageRoute(
+          builder: (_) => VideoDetailsScreen(
+            course: dummyCourse,
+            allCourseVideos: [mat],
+            initialVideo: mat,
+          ),
+        ),
       );
       return;
     }
@@ -92,7 +105,7 @@ class _ApprovalsScreenState extends State<ApprovalsScreen>
       Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => PdfViewerScreen(
-            pdfUrl: mat.fileUrl!,
+            url: mat.fileUrl!,
             title: mat.title,
           ),
         ),

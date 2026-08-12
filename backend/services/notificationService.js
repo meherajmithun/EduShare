@@ -299,6 +299,27 @@ const notifyContributorOnRatingUpdated = async ({ material, student }) => {
   }
 };
 
+/**
+ * Notify a contributor that someone new started following them.
+ */
+const notifyContributorOnNewFollower = async ({ contributor, follower }) => {
+  try {
+    if (!contributor || !follower) return;
+
+    await Notification.create({
+      recipient: contributor._id,
+      sender: follower._id,
+      senderName: follower.name,
+      title: 'New Follower 🎉',
+      message: `${follower.name} started following you and will receive updates about your new materials.`,
+      type: 'new_follower',
+      relatedEntityId: follower._id.toString(),
+    });
+  } catch (err) {
+    console.error('[NotificationService] Failed to notify contributor on new follower:', err.message);
+  }
+};
+
 module.exports = {
   notifyFacultyAdminOnUpload,
   notifyContributorOnApproval,
@@ -312,4 +333,5 @@ module.exports = {
   notifyContributorOnAccountRejection,
   notifyContributorOnRatingSubmitted,
   notifyContributorOnRatingUpdated,
+  notifyContributorOnNewFollower,
 };

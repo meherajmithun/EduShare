@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:edushare/core/theme.dart';
+import 'package:edushare/core/role_helper.dart';
 import 'package:edushare/core/services/auth_service.dart';
 import 'package:edushare/models/user_model.dart';
 import 'package:edushare/views/home/home_screen.dart';
 import 'package:edushare/views/home/search_screen.dart';
+import 'package:edushare/views/home/contributor_dashboard_screen.dart';
 import 'package:edushare/views/upload/upload_resource_screen.dart';
 import 'package:edushare/views/upload/my_uploads_screen.dart';
 import 'package:edushare/views/admin/admin_dashboard_screen.dart';
@@ -20,7 +22,7 @@ import 'package:edushare/views/admin/manage_courses_screen.dart';
 /// it is NOT in the bottom navigation.
 ///
 ///   Student       → Home · Search
-///   Contributor   → Home · Search · Upload (modal) · My Uploads
+///   Contributor   → Dashboard · Search · Upload (modal) · My Uploads
 ///   Admin         → Dashboard · Courses · Approvals · Materials · Users
 ///   Faculty Admin → Dashboard · Courses · Approvals · Materials · Users
 ///   Super Admin   → Dashboard · Admins · Users
@@ -196,10 +198,10 @@ class _MainShellState extends State<MainShell> {
       case 'contributor':
         return const [
           _TabItem(
-            label: 'Home',
-            icon: Icons.home_outlined,
-            selectedIcon: Icons.home_rounded,
-            screen: HomeScreen(),
+            label: 'Dashboard',
+            icon: Icons.dashboard_outlined,
+            selectedIcon: Icons.dashboard_rounded,
+            screen: ContributorDashboardScreen(),
           ),
           _TabItem(
             label: 'Search',

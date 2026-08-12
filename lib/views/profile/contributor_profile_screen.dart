@@ -1,10 +1,22 @@
+/// contributor_profile_screen.dart — Figma-matched Contributor Profile (Student View)
+///
+/// Layout:
+///   - Custom AppBar: back | "CONTRIBUTOR PROFILE" | share button
+///   - Profile header card: avatar + name + verified badge + status/dept + bio
+///   - Follow button (student only, optimistic update)
+///   - Stats row: Rating | Reviews | Uploads | Downloads | Followers | Following
+///   - Tab Section: TOP RESOURCES | RECENT UPLOADS
+///   - Resource cards: type icon + title + views + rating stars
+///   - Rating/review dialog preserved from original
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:youtube_player_flutter/youtube_player_flutter.dart';
 import 'package:edushare/core/theme.dart';
 import 'package:edushare/core/services/auth_service.dart';
 import 'package:edushare/core/services/firestore_service.dart';
+import 'package:edushare/core/role_helper.dart';
 import 'package:edushare/models/contributor_profile_model.dart';
 import 'package:edushare/models/material_model.dart';
 import 'package:edushare/models/rating_model.dart';
@@ -35,6 +47,7 @@ class _ContributorProfileScreenState extends State<ContributorProfileScreen>
   List<RatingModel> _ratings = [];
   RatingModel? _myRating;
   String? _errorMessage;
+  bool _isFollowLoading = false;
 
   late TabController _tabController;
 
@@ -78,6 +91,42 @@ class _ContributorProfileScreenState extends State<ContributorProfileScreen>
           _isLoading = false;
         });
       }
+    }
+  }
+
+  Future<void> _toggleFollow() async {
+    if (_profile == null) return;
+    setState(() => _isFollowLoading = true);
+    final wasFollowing = _profile!.isFollowing;
+    // Optimistic update
+    setState(() {
+      _profile = _profile!.copyWith(
+        isFollowing: !wasFollowing,
+        followerCount: _profile!.followerCount + (wasFollowing ? -1 : 1),
+      );
+    });
+
+    try {
+      if (wasFollowing) {
+        await _service.unfollowContributor(widget.contributorId);
+      } else {
+        await _service.followContributor(widget.contributorId);
+      }
+    } catch (e) {
+      // Roll back
+      if (mounted) {
+        setState(() {
+          _profile = _profile!.copyWith(
+            isFollowing: wasFollowing,
+            followerCount: _profile!.followerCount + (wasFollowing ? 1 : -1),
+          );
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.toString().replaceAll('Exception: ', ''))),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isFollowLoading = false);
     }
   }
 
@@ -131,9 +180,7 @@ class _ContributorProfileScreenState extends State<ContributorProfileScreen>
                   decoration: InputDecoration(
                     hintText: 'Write an optional review...',
                     hintStyle: const TextStyle(fontSize: 13),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
                       borderSide: const BorderSide(color: AppTheme.primaryColor),
@@ -176,23 +223,21 @@ class _ContributorProfileScreenState extends State<ContributorProfileScreen>
                           Navigator.of(ctx).pop();
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
+                              backgroundColor: AppTheme.primaryColor,
                               content: Text(isEditing
                                   ? 'Rating updated successfully!'
-                                  : 'Thank you for your rating!'),
-                              backgroundColor: Colors.green,
-                              behavior: SnackBarBehavior.floating,
+                                  : 'Rating submitted successfully!'),
                             ),
                           );
                           _loadProfileData();
                         }
                       } catch (e) {
-                        setDialogState(() => isSubmitting = false);
                         if (context.mounted) {
+                          setDialogState(() => isSubmitting = false);
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
+                              backgroundColor: const Color(0xFFEF4444),
                               content: Text(e.toString().replaceAll('Exception: ', '')),
-                              backgroundColor: Colors.redAccent,
-                              behavior: SnackBarBehavior.floating,
                             ),
                           );
                         }
@@ -200,8 +245,8 @@ class _ContributorProfileScreenState extends State<ContributorProfileScreen>
                     },
               child: isSubmitting
                   ? const SizedBox(
-                      width: 18,
-                      height: 18,
+                      width: 16,
+                      height: 16,
                       child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
                     )
                   : Text(isEditing ? 'Update' : 'Submit'),
@@ -212,675 +257,783 @@ class _ContributorProfileScreenState extends State<ContributorProfileScreen>
     );
   }
 
-  void _confirmDeleteRating() {
-    showDialog(
+  Future<void> _deleteRating() async {
+    final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Delete Rating', style: TextStyle(fontWeight: FontWeight.bold)),
-        content: const Text('Are you sure you want to remove your rating?'),
+        title: const Text('Remove Rating'),
+        content: const Text('Are you sure you want to remove your rating for this contributor?'),
         actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
           TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.redAccent,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-            onPressed: () async {
-              Navigator.of(ctx).pop();
-              try {
-                await _service.deleteRating(widget.contributorId);
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Rating deleted.'),
-                      backgroundColor: Colors.orange,
-                      behavior: SnackBarBehavior.floating,
-                    ),
-                  );
-                  _loadProfileData();
-                }
-              } catch (e) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(e.toString().replaceAll('Exception: ', '')),
-                      backgroundColor: Colors.redAccent,
-                      behavior: SnackBarBehavior.floating,
-                    ),
-                  );
-                }
-              }
-            },
-            child: const Text('Delete'),
+            style: TextButton.styleFrom(foregroundColor: const Color(0xFFEF4444)),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Remove'),
           ),
         ],
       ),
     );
-  }
-
-  void _openUrl(String? url) async {
-    if (url == null || url.isEmpty) return;
-    final Uri uri = Uri.parse(url);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (confirmed != true) return;
+    try {
+      await _service.deleteRating(widget.contributorId);
+      _loadProfileData();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.toString().replaceAll('Exception: ', ''))),
+        );
+      }
     }
   }
 
-  void _playYoutubeVideo(String videoUrl) {
-    final videoId = YoutubePlayer.convertUrlToId(videoUrl);
-    if (videoId == null) {
-      _openUrl(videoUrl);
-      return;
+  // ── Material action launcher ───────────────────────────────────────────────
+  Future<void> _launchMaterial(MaterialModel m) async {
+    if (m.type == 'video') {
+      if (m.videoLink != null) {
+        final uri = Uri.parse(m.videoLink!);
+        if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
+      }
+    } else if (m.fileUrl != null && m.fileUrl!.isNotEmpty) {
+      final uri = Uri.parse(m.fileUrl!);
+      if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
-    showDialog(
-      context: context,
-      builder: (context) {
-        final YoutubePlayerController controller = YoutubePlayerController(
-          initialVideoId: videoId,
-          flags: const YoutubePlayerFlags(autoPlay: true, mute: false),
-        );
-        return Dialog(
-          backgroundColor: Colors.black,
-          insetPadding: const EdgeInsets.symmetric(horizontal: 10),
-          child: AspectRatio(
-            aspectRatio: 16 / 9,
-            child: YoutubePlayer(
-              controller: controller,
-              showVideoProgressIndicator: true,
-              progressIndicatorColor: AppTheme.primaryColor,
-            ),
-          ),
-        );
-      },
-    );
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final currentUser = context.select<AuthService, UserModel?>((s) => s.currentUser);
-    final isStudent = currentUser != null && currentUser.role == 'student';
-
-    if (_isLoading) {
-      return Scaffold(
-        appBar: AppBar(title: Text(widget.contributorName ?? 'Contributor Profile')),
-        body: const Center(
-          child: CircularProgressIndicator(color: AppTheme.primaryColor),
-        ),
-      );
-    }
-
-    if (_errorMessage != null || _profile == null) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('Contributor Profile')),
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.error_outline_rounded, size: 48, color: Colors.redAccent),
-              const SizedBox(height: 12),
-              Text(_errorMessage ?? 'Failed to load contributor profile.'),
-              const SizedBox(height: 16),
-              ElevatedButton(
-                onPressed: _loadProfileData,
-                child: const Text('Retry'),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    final p = _profile!;
+    final currentUser = context.read<AuthService>().currentUser;
+    final isStudent = currentUser?.isStudent ?? false;
+    final isDark = theme.brightness == Brightness.dark;
 
     return Scaffold(
+      backgroundColor: theme.scaffoldBackgroundColor,
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator(color: AppTheme.primaryColor))
+          : _errorMessage != null
+              ? _buildError(theme)
+              : _buildContent(theme, currentUser, isStudent, isDark),
+    );
+  }
+
+  Widget _buildError(ThemeData theme) {
+    return Scaffold(
       appBar: AppBar(
-        title: const Text('Contributor Profile', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text('Contributor Profile'),
+        leading: const BackButton(),
       ),
-      body: NestedScrollView(
-        headerSliverBuilder: (context, innerBoxIsScrolled) => [
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                children: [
-                  // Avatar
-                  Container(
-                    width: 90,
-                    height: 90,
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [AppTheme.primaryColor, AppTheme.accentColor],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: AppTheme.primaryColor.withOpacity(0.3),
-                          blurRadius: 16,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: ClipOval(
-                      child: (p.profilePhotoUrl.isNotEmpty)
-                          ? Image.network(
-                              p.profilePhotoUrl,
-                              fit: BoxFit.cover,
-                              width: 90,
-                              height: 90,
-                              errorBuilder: (_, __, ___) => _buildInitials(p.name),
-                            )
-                          : _buildInitials(p.name),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.error_outline, size: 48, color: Color(0xFFEF4444)),
+            const SizedBox(height: 12),
+            Text(_errorMessage ?? 'Something went wrong',
+                textAlign: TextAlign.center),
+            const SizedBox(height: 16),
+            ElevatedButton(onPressed: _loadProfileData, child: const Text('Retry')),
+          ],
+        ),
+      ),
+    );
+  }
 
-                  // Name
-                  Text(
-                    p.name,
-                    style: theme.textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 22,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
+  Widget _buildContent(
+      ThemeData theme, UserModel? currentUser, bool isStudent, bool isDark) {
+    final profile = _profile!;
 
-                  // Department badge
-                  if (p.department.isNotEmpty) ...[
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: AppTheme.primaryColor.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: AppTheme.primaryColor.withOpacity(0.3)),
-                      ),
-                      child: Text(
-                        p.department,
-                        style: const TextStyle(
-                          color: AppTheme.primaryColor,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                  ],
+    // Sorted materials for each tab
+    final topResources = [..._materials]
+      ..sort((a, b) => b.views.compareTo(a.views));
+    final recentUploads = [..._materials]
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
-                  // Bio card (if present)
-                  if (p.bio.isNotEmpty) ...[
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: theme.brightness == Brightness.dark
-                            ? AppTheme.darkCard
-                            : AppTheme.lightCard,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        p.bio,
-                        textAlign: TextAlign.center,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          fontStyle: FontStyle.italic,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                  ],
-
-                  // Stats grid (4 metrics)
-                  Row(
+    return NestedScrollView(
+      headerSliverBuilder: (context, innerBoxScrolled) => [
+        SliverToBoxAdapter(
+          child: Column(
+            children: [
+              // ── Custom AppBar ─────────────────────────────────────────
+              SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+                  child: Row(
                     children: [
+                      IconButton(
+                        icon: Container(
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            color: isDark ? AppTheme.darkSurface : AppTheme.lightCard,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.arrow_back_ios_new_rounded, size: 16),
+                        ),
+                        onPressed: () => Navigator.of(context).pop(),
+                      ),
                       Expanded(
-                        child: _buildStatCard(
-                          theme,
-                          icon: Icons.star_rounded,
-                          iconColor: Colors.amber,
-                          value: p.avgRating > 0 ? p.avgRating.toStringAsFixed(1) : 'N/A',
-                          label: 'Avg Rating',
+                        child: Column(
+                          children: [
+                            Text(
+                              'CONTRIBUTOR PROFILE',
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                fontSize: 10,
+                                letterSpacing: 1.4,
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.primaryColor,
+                              ),
+                            ),
+                            Text(
+                              profile.name,
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: _buildStatCard(
-                          theme,
-                          icon: Icons.rate_review_rounded,
-                          iconColor: Colors.blueAccent,
-                          value: '${p.totalRatings}',
-                          label: 'Reviews',
+                      // Share button
+                      IconButton(
+                        icon: Container(
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            color: isDark ? AppTheme.darkSurface : AppTheme.lightCard,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.share_rounded, size: 18),
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: _buildStatCard(
-                          theme,
-                          icon: Icons.cloud_upload_rounded,
-                          iconColor: Colors.purpleAccent,
-                          value: '${p.totalUploads}',
-                          label: 'Uploads',
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: _buildStatCard(
-                          theme,
-                          icon: Icons.verified_rounded,
-                          iconColor: Colors.green,
-                          value: '${p.approvedUploads}',
-                          label: 'Approved',
-                        ),
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(
+                            text: 'Check out ${profile.name}\'s profile on EduShare!',
+                          ));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Profile link copied!')),
+                          );
+                        },
                       ),
                     ],
                   ),
-                  const SizedBox(height: 16),
+                ),
+              ),
 
-                  // Student Rating Action Card
-                  if (isStudent) ...[
-                    GlassCard(
-                      padding: const EdgeInsets.all(14),
-                      child: Column(
+              const SizedBox(height: 16),
+
+              // ── Profile Header Card ───────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: GlassCard(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    children: [
+                      // Avatar + follow
+                      Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(
-                            children: [
-                              const Icon(Icons.rate_review_rounded,
-                                  color: AppTheme.primaryColor, size: 20),
-                              const SizedBox(width: 8),
-                              Text(
-                                _myRating != null ? 'Your Rating' : 'Rate this Contributor',
-                                style: theme.textTheme.titleMedium
-                                    ?.copyWith(fontWeight: FontWeight.bold, fontSize: 14),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          if (_myRating != null) ...[
-                            Row(
+                          _buildAvatar(profile),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
+                                // Name + verified badge
                                 Row(
-                                  children: List.generate(
-                                    5,
-                                    (i) => Icon(
-                                      i < _myRating!.stars
-                                          ? Icons.star_rounded
-                                          : Icons.star_outline_rounded,
-                                      color: Colors.amber,
-                                      size: 20,
+                                  children: [
+                                    Flexible(
+                                      child: Text(
+                                        profile.name,
+                                        style: theme.textTheme.titleMedium?.copyWith(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 17,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
                                     ),
-                                  ),
+                                    if (profile.isVerified) ...[
+                                      const SizedBox(width: 6),
+                                      const _VerifiedBadge(),
+                                    ],
+                                  ],
                                 ),
-                                const SizedBox(width: 8),
+                                const SizedBox(height: 4),
+                                // Designation or department
                                 Text(
-                                  '${_myRating!.stars} / 5',
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.bold, fontSize: 13),
+                                  profile.designation.isNotEmpty
+                                      ? profile.designation
+                                      : profile.department,
+                                  style: theme.textTheme.bodyMedium?.copyWith(fontSize: 12),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 8),
+                                // Follow / Rate buttons
+                                Row(
+                                  children: [
+                                    if (isStudent) ...[
+                                      _FollowButton(
+                                        isFollowing: profile.isFollowing,
+                                        isLoading: _isFollowLoading,
+                                        onTap: _toggleFollow,
+                                      ),
+                                      const SizedBox(width: 8),
+                                    ],
+                                    _RateButton(
+                                      myRating: _myRating,
+                                      isStudent: isStudent,
+                                      onTap: () => _showRatingDialog(
+                                          isEditing: _myRating != null),
+                                    ),
+                                  ],
                                 ),
                               ],
                             ),
-                            if (_myRating!.review.isNotEmpty) ...[
-                              const SizedBox(height: 4),
-                              Text(
-                                '"${_myRating!.review}"',
-                                style: theme.textTheme.bodyMedium
-                                    ?.copyWith(fontSize: 12, fontStyle: FontStyle.italic),
-                              ),
-                            ],
-                            const SizedBox(height: 10),
-                            Row(
-                              children: [
-                                OutlinedButton.icon(
-                                  style: OutlinedButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 12, vertical: 8),
-                                    shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(10)),
-                                  ),
-                                  icon: const Icon(Icons.edit_rounded, size: 14),
-                                  label: const Text('Edit', style: TextStyle(fontSize: 12)),
-                                  onPressed: () => _showRatingDialog(isEditing: true),
-                                ),
-                                const SizedBox(width: 8),
-                                OutlinedButton.icon(
-                                  style: OutlinedButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 12, vertical: 8),
-                                    foregroundColor: Colors.redAccent,
-                                    side: const BorderSide(color: Colors.redAccent),
-                                    shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(10)),
-                                  ),
-                                  icon: const Icon(Icons.delete_outline_rounded, size: 14),
-                                  label: const Text('Delete', style: TextStyle(fontSize: 12)),
-                                  onPressed: _confirmDeleteRating,
-                                ),
-                              ],
+                          ),
+                        ],
+                      ),
+
+                      // Bio
+                      if (profile.bio.isNotEmpty) ...[
+                        const SizedBox(height: 14),
+                        const Divider(height: 1),
+                        const SizedBox(height: 14),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            profile.bio,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              fontSize: 13,
+                              height: 1.6,
                             ),
-                          ] else ...[
-                            const Text(
-                              'Have you downloaded materials from this contributor? Share your rating to help fellow students!',
-                              style: TextStyle(fontSize: 12, color: Colors.grey),
-                            ),
-                            const SizedBox(height: 10),
-                            ElevatedButton.icon(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: AppTheme.primaryColor,
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 16, vertical: 10),
-                                shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(10)),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              // ── Stats Row ─────────────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: GlassCard(
+                  padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      _StatCell(
+                        label: 'Rating',
+                        value: profile.avgRating.toStringAsFixed(1),
+                        icon: Icons.star_rounded,
+                        iconColor: const Color(0xFFF59E0B),
+                      ),
+                      _vDivider(),
+                      _StatCell(
+                          label: 'Reviews', value: '${profile.totalRatings}'),
+                      _vDivider(),
+                      _StatCell(
+                          label: 'Uploads', value: '${profile.approvedUploads}'),
+                      _vDivider(),
+                      _StatCell(
+                        label: 'Downloads',
+                        value: _formatCount(profile.totalDownloads),
+                      ),
+                      _vDivider(),
+                      _StatCell(
+                          label: 'Followers', value: '${profile.followerCount}'),
+                      _vDivider(),
+                      _StatCell(
+                          label: 'Following', value: '${profile.followingCount}'),
+                    ],
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              // ── Tab Bar ───────────────────────────────────────────────
+              Container(
+                margin: const EdgeInsets.symmetric(horizontal: 16),
+                decoration: BoxDecoration(
+                  color: isDark ? AppTheme.darkSurface : AppTheme.lightCard,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: TabBar(
+                  controller: _tabController,
+                  labelColor: Colors.white,
+                  unselectedLabelColor: theme.textTheme.bodyMedium?.color,
+                  labelStyle: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                    letterSpacing: 0.8,
+                  ),
+                  indicator: BoxDecoration(
+                    color: AppTheme.primaryColor,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  indicatorSize: TabBarIndicatorSize.tab,
+                  tabs: [
+                    const Tab(text: 'TOP RESOURCES'),
+                    Tab(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Text(
+                            'RECENT UPLOADS',
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                          ),
+                          if (_ratings.isNotEmpty) ...[
+                            const SizedBox(width: 4),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: AppTheme.accentColor,
+                                borderRadius: BorderRadius.circular(8),
                               ),
-                              icon: const Icon(Icons.star_rounded, size: 16),
-                              label: const Text('Write a Review',
-                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                              onPressed: () => _showRatingDialog(isEditing: false),
+                              child: Text(
+                                '${_ratings.length}',
+                                style: const TextStyle(
+                                    color: Colors.white, fontSize: 9),
+                              ),
                             ),
                           ],
                         ],
                       ),
                     ),
                   ],
-                ],
+                ),
               ),
-            ),
-          ),
-          SliverPersistentHeader(
-            pinned: true,
-            delegate: _SliverTabBarDelegate(
-              TabBar(
-                controller: _tabController,
-                indicatorColor: AppTheme.primaryColor,
-                labelColor: AppTheme.primaryColor,
-                unselectedLabelColor: theme.brightness == Brightness.dark
-                    ? AppTheme.darkTextSecondary
-                    : AppTheme.lightTextSecondary,
-                labelStyle: const TextStyle(fontWeight: FontWeight.bold),
-                tabs: [
-                  Tab(text: 'Approved Materials (${_materials.length})'),
-                  Tab(text: 'Student Reviews (${_ratings.length})'),
-                ],
-              ),
-              theme: theme,
-            ),
-          ),
-        ],
-        body: TabBarView(
-          controller: _tabController,
-          children: [
-            _buildMaterialsList(theme),
-            _buildRatingsList(theme),
-          ],
-        ),
-      ),
-    );
-  }
 
-  Widget _buildStatCard(
-    ThemeData theme, {
-    required IconData icon,
-    required Color iconColor,
-    required String value,
-    required String label,
-  }) {
-    final isDark = theme.brightness == Brightness.dark;
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
-      decoration: BoxDecoration(
-        color: isDark ? AppTheme.darkCard : AppTheme.lightCard,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
+              const SizedBox(height: 8),
+            ],
+          ),
         ),
-      ),
-      child: Column(
+      ],
+      body: TabBarView(
+        controller: _tabController,
         children: [
-          Icon(icon, color: iconColor, size: 22),
-          const SizedBox(height: 6),
-          Text(
-            value,
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.bold,
-              fontSize: 15,
-            ),
+          // ── TOP RESOURCES ─────────────────────────────────────────────
+          _MaterialList(
+            materials: topResources.take(8).toList(),
+            emptyMessage: 'No approved resources yet.',
+            onTap: _launchMaterial,
           ),
-          const SizedBox(height: 2),
-          Text(
-            label,
-            style: theme.textTheme.bodyMedium?.copyWith(fontSize: 10),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+          // ── RECENT UPLOADS ────────────────────────────────────────────
+          _MaterialList(
+            materials: recentUploads.take(10).toList(),
+            emptyMessage: 'No resources uploaded yet.',
+            onTap: _launchMaterial,
           ),
         ],
       ),
     );
   }
 
-  Widget _buildMaterialsList(ThemeData theme) {
-    if (_materials.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.folder_open_rounded, size: 48, color: theme.disabledColor),
-            const SizedBox(height: 12),
-            Text('No approved materials yet', style: theme.textTheme.bodyMedium),
-          ],
+  Widget _buildAvatar(ContributorProfileModel profile) {
+    final initials = profile.name.isNotEmpty
+        ? profile.name.trim().split(' ').take(2).map((w) => w[0].toUpperCase()).join()
+        : 'C';
+    return Container(
+      width: 64,
+      height: 64,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: const LinearGradient(
+          colors: [AppTheme.primaryColor, AppTheme.primaryDark],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
         ),
-      );
-    }
-
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: _materials.length,
-      itemBuilder: (context, index) {
-        final mat = _materials[index];
-        final isVideo = mat.type == 'video';
-
-        return Container(
-          margin: const EdgeInsets.only(bottom: 12),
-          child: GlassCard(
-            padding: const EdgeInsets.all(14),
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: (isVideo ? Colors.redAccent : AppTheme.primaryColor)
-                        .withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(
-                    isVideo
-                        ? Icons.play_circle_fill_rounded
-                        : mat.type == 'assignment'
-                            ? Icons.task_rounded
-                            : Icons.text_snippet_rounded,
-                    color: isVideo ? Colors.redAccent : AppTheme.primaryColor,
-                    size: 22,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        mat.title,
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                        ),
-                      ),
-                      if (mat.description.isNotEmpty) ...[
-                        const SizedBox(height: 2),
-                        Text(
-                          mat.description,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodyMedium?.copyWith(fontSize: 12),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    backgroundColor: isVideo ? Colors.redAccent : AppTheme.primaryColor,
-                  ),
-                  onPressed: () {
-                    if (isVideo && mat.videoLink != null) {
-                      _playYoutubeVideo(mat.videoLink!);
-                    } else {
-                      _openUrl(mat.fileUrl);
-                    }
-                  },
-                  child: Text(
-                    isVideo ? 'Play' : 'Open',
-                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildRatingsList(ThemeData theme) {
-    if (_ratings.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.star_outline_rounded, size: 48, color: theme.disabledColor),
-            const SizedBox(height: 12),
-            Text('No reviews submitted yet', style: theme.textTheme.bodyMedium),
-          ],
-        ),
-      );
-    }
-
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: _ratings.length,
-      itemBuilder: (context, index) {
-        final r = _ratings[index];
-        return Container(
-          margin: const EdgeInsets.only(bottom: 12),
-          child: GlassCard(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Row(
-                      children: [
-                        CircleAvatar(
-                          radius: 14,
-                          backgroundColor: AppTheme.primaryColor.withOpacity(0.2),
-                          child: Text(
-                            r.ratedByName.isNotEmpty ? r.ratedByName[0].toUpperCase() : 'S',
-                            style: const TextStyle(
-                                color: AppTheme.primaryColor,
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          r.ratedByName,
-                          style: theme.textTheme.titleMedium
-                              ?.copyWith(fontWeight: FontWeight.bold, fontSize: 13),
-                        ),
-                      ],
-                    ),
-                    Row(
-                      children: List.generate(
-                        5,
-                        (i) => Icon(
-                          i < r.stars ? Icons.star_rounded : Icons.star_outline_rounded,
-                          color: Colors.amber,
-                          size: 16,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                if (r.review.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    r.review,
-                    style: theme.textTheme.bodyMedium?.copyWith(fontSize: 13),
-                  ),
-                ],
-                const SizedBox(height: 6),
-                Text(
-                  _formatDate(r.createdAt),
-                  style: theme.textTheme.bodyMedium?.copyWith(fontSize: 10, color: Colors.grey),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildInitials(String name) {
-    return Center(
-      child: Text(
-        name.isNotEmpty ? name[0].toUpperCase() : 'C',
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 38,
-          fontWeight: FontWeight.bold,
-        ),
+        image: profile.profilePhotoUrl.isNotEmpty
+            ? DecorationImage(
+                image: NetworkImage(profile.profilePhotoUrl),
+                fit: BoxFit.cover,
+                onError: (_, __) {},
+              )
+            : null,
       ),
+      child: profile.profilePhotoUrl.isEmpty
+          ? Center(
+              child: Text(
+                initials,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 20,
+                ),
+              ),
+            )
+          : null,
     );
   }
 
-  String _formatDate(DateTime dt) {
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    return '${months[dt.month - 1]} ${dt.day}, ${dt.year}';
+  Widget _vDivider() {
+    return Container(height: 28, width: 1, color: AppTheme.darkBorder);
+  }
+
+  static String _formatCount(int n) {
+    if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M';
+    if (n >= 1000) return '${(n / 1000).toStringAsFixed(1)}K';
+    return '$n';
   }
 }
 
-class _SliverTabBarDelegate extends SliverPersistentHeaderDelegate {
-  final TabBar tabBar;
-  final ThemeData theme;
-
-  _SliverTabBarDelegate(this.tabBar, {required this.theme});
-
+// ─── Verified Badge ───────────────────────────────────────────────────────────
+class _VerifiedBadge extends StatelessWidget {
+  const _VerifiedBadge();
   @override
-  double get minExtent => tabBar.preferredSize.height;
-
-  @override
-  double get maxExtent => tabBar.preferredSize.height;
-
-  @override
-  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
-    return Container(
-      color: theme.brightness == Brightness.dark
-          ? AppTheme.darkBackground
-          : AppTheme.lightBackground,
-      child: tabBar,
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: 'Verified Contributor (≥4.0 rating)',
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xFF10B981), Color(0xFF059669)],
+          ),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.verified_rounded, color: Colors.white, size: 10),
+            SizedBox(width: 2),
+            Text(
+              'VERIFIED',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 8,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 0.5,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
+  }
+}
+
+// ─── Follow Button ────────────────────────────────────────────────────────────
+class _FollowButton extends StatelessWidget {
+  final bool isFollowing;
+  final bool isLoading;
+  final VoidCallback onTap;
+
+  const _FollowButton({
+    required this.isFollowing,
+    required this.isLoading,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: isLoading ? null : onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: isFollowing
+              ? Colors.transparent
+              : AppTheme.primaryColor,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: isFollowing ? AppTheme.primaryColor : Colors.transparent,
+          ),
+        ),
+        child: isLoading
+            ? const SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(
+                  color: AppTheme.primaryColor,
+                  strokeWidth: 2,
+                ),
+              )
+            : Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    isFollowing
+                        ? Icons.person_remove_outlined
+                        : Icons.person_add_rounded,
+                    size: 14,
+                    color: isFollowing ? AppTheme.primaryColor : Colors.white,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    isFollowing ? 'Following' : 'Follow',
+                    style: TextStyle(
+                      color: isFollowing ? AppTheme.primaryColor : Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+}
+
+// ─── Rate Button ──────────────────────────────────────────────────────────────
+class _RateButton extends StatelessWidget {
+  final RatingModel? myRating;
+  final bool isStudent;
+  final VoidCallback onTap;
+
+  const _RateButton({
+    required this.myRating,
+    required this.isStudent,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (!isStudent) return const SizedBox.shrink();
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF59E0B).withOpacity(0.12),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0xFFF59E0B).withOpacity(0.4)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.star_rounded, size: 14, color: Color(0xFFF59E0B)),
+            const SizedBox(width: 4),
+            Text(
+              myRating != null ? 'Edit Rating' : 'Rate',
+              style: const TextStyle(
+                color: Color(0xFFF59E0B),
+                fontWeight: FontWeight.bold,
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Stat Cell ────────────────────────────────────────────────────────────────
+class _StatCell extends StatelessWidget {
+  final String label;
+  final String value;
+  final IconData? icon;
+  final Color? iconColor;
+
+  const _StatCell({
+    required this.label,
+    required this.value,
+    this.icon,
+    this.iconColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (icon != null) ...[
+              Icon(icon, size: 13, color: iconColor),
+              const SizedBox(width: 2),
+            ],
+            Text(
+              value,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+                fontSize: 15,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 2),
+        Text(
+          label,
+          style: theme.textTheme.bodyMedium?.copyWith(fontSize: 10),
+        ),
+      ],
+    );
+  }
+}
+
+// ─── Material List (Scrollable) ───────────────────────────────────────────────
+class _MaterialList extends StatelessWidget {
+  final List<MaterialModel> materials;
+  final String emptyMessage;
+  final Future<void> Function(MaterialModel) onTap;
+
+  const _MaterialList({
+    required this.materials,
+    required this.emptyMessage,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (materials.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.folder_open_rounded,
+                  size: 48, color: Theme.of(context).disabledColor),
+              const SizedBox(height: 12),
+              Text(emptyMessage,
+                  style: Theme.of(context).textTheme.bodyMedium,
+                  textAlign: TextAlign.center),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+      itemCount: materials.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 10),
+      itemBuilder: (context, i) => _MaterialCard(
+        material: materials[i],
+        onTap: () => onTap(materials[i]),
+      ),
+    );
+  }
+}
+
+// ─── Material Card ────────────────────────────────────────────────────────────
+class _MaterialCard extends StatelessWidget {
+  final MaterialModel material;
+  final VoidCallback onTap;
+
+  const _MaterialCard({required this.material, required this.onTap});
+
+  IconData get _typeIcon {
+    switch (material.type) {
+      case 'video':
+        return Icons.play_circle_fill_rounded;
+      case 'pdf':
+        return Icons.picture_as_pdf_rounded;
+      case 'assignment':
+        return Icons.assignment_rounded;
+      default:
+        return Icons.article_rounded;
+    }
+  }
+
+  Color get _typeColor {
+    switch (material.type) {
+      case 'video':
+        return const Color(0xFFEF4444);
+      case 'pdf':
+        return const Color(0xFFF59E0B);
+      case 'assignment':
+        return AppTheme.primaryColor;
+      default:
+        return const Color(0xFF10B981);
+    }
   }
 
   @override
-  bool shouldRebuild(_SliverTabBarDelegate oldDelegate) => false;
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          color: isDark ? AppTheme.darkSurface : AppTheme.lightCard,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
+          ),
+        ),
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          children: [
+            // Type icon
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: _typeColor.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(_typeIcon, color: _typeColor, size: 22),
+            ),
+            const SizedBox(width: 12),
+            // Title + meta
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: _typeColor.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      material.type.toUpperCase(),
+                      style: TextStyle(
+                        color: _typeColor,
+                        fontSize: 9,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    material.title,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Icon(Icons.remove_red_eye_rounded,
+                          size: 12, color: theme.disabledColor),
+                      const SizedBox(width: 3),
+                      Text(
+                        '${material.views}',
+                        style: theme.textTheme.bodyMedium?.copyWith(fontSize: 11),
+                      ),
+                      const SizedBox(width: 10),
+                      Icon(Icons.star_rounded,
+                          size: 12, color: const Color(0xFFF59E0B)),
+                      const SizedBox(width: 3),
+                      Text(
+                        material.avgRating.toStringAsFixed(1),
+                        style: theme.textTheme.bodyMedium?.copyWith(fontSize: 11),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.arrow_forward_ios_rounded,
+                size: 14, color: theme.disabledColor),
+          ],
+        ),
+      ),
+    );
+  }
 }

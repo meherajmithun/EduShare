@@ -12,7 +12,11 @@ import 'package:edushare/widgets/app_bar_profile_avatar.dart';
 /// with live pending / approved / rejected status, assigned reviewer,
 /// and rejection reason when applicable.
 class MyUploadsScreen extends StatefulWidget {
-  const MyUploadsScreen({Key? key}) : super(key: key);
+  /// Optional pre-selected filter. Pass 'approved', 'pending', or 'rejected'
+  /// to open the screen with that tab already selected.
+  final String initialFilter;
+
+  const MyUploadsScreen({Key? key, this.initialFilter = 'all'}) : super(key: key);
 
   @override
   State<MyUploadsScreen> createState() => _MyUploadsScreenState();
@@ -23,11 +27,12 @@ class _MyUploadsScreenState extends State<MyUploadsScreen> {
   List<MaterialModel> _myMaterials = [];
   List<MaterialModel> _filteredMaterials = [];
   bool _isLoading = true;
-  String _filterStatus = 'all';
+  late String _filterStatus;
 
   @override
   void initState() {
     super.initState();
+    _filterStatus = widget.initialFilter;
     _loadMyUploads();
   }
 

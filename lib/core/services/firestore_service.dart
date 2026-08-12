@@ -365,6 +365,24 @@ class FirestoreService {
     await _api.delete('/api/contributors/$contributorId/ratings');
   }
 
+  /// Follow a contributor (students only)
+  Future<Map<String, dynamic>> followContributor(String contributorId) async {
+    final data = await _api.post('/api/contributors/$contributorId/follow', {});
+    return data as Map<String, dynamic>;
+  }
+
+  /// Unfollow a contributor (students only)
+  Future<Map<String, dynamic>> unfollowContributor(String contributorId) async {
+    final data = await _api.delete('/api/contributors/$contributorId/follow');
+    return data as Map<String, dynamic>;
+  }
+
+  /// Fetch the current contributor's dashboard performance stats
+  Future<Map<String, dynamic>> getContributorStats() async {
+    final data = await _api.get('/api/contributors/me/stats');
+    return data as Map<String, dynamic>;
+  }
+
   // ─── Material Rating System ────────────────────────────────────────────
 
   /// Fetch ratings for a specific material + current user's own rating.

@@ -1,30 +1,40 @@
-// This is a basic Flutter widget test.
+// EduShare widget tests — Contributor Dashboard smoke tests.
 //
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
+// These tests verify the key data-flow fixes introduced for the dashboard:
+//   1. MyUploadsScreen accepts an initialFilter parameter
+//   2. ContributorDashboardScreen can be instantiated without errors
 
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-import 'package:edushare/main.dart';
+import 'package:edushare/views/upload/my_uploads_screen.dart';
+import 'package:edushare/views/home/contributor_dashboard_screen.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  group('MyUploadsScreen', () {
+    test('defaults initialFilter to all', () {
+      const screen = MyUploadsScreen();
+      expect(screen.initialFilter, equals('all'));
+    });
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    test('accepts approved initialFilter', () {
+      const screen = MyUploadsScreen(initialFilter: 'approved');
+      expect(screen.initialFilter, equals('approved'));
+    });
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+    test('accepts pending initialFilter', () {
+      const screen = MyUploadsScreen(initialFilter: 'pending');
+      expect(screen.initialFilter, equals('pending'));
+    });
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    test('accepts rejected initialFilter', () {
+      const screen = MyUploadsScreen(initialFilter: 'rejected');
+      expect(screen.initialFilter, equals('rejected'));
+    });
+  });
+
+  group('ContributorDashboardScreen', () {
+    test('can be instantiated', () {
+      const screen = ContributorDashboardScreen();
+      expect(screen, isNotNull);
+    });
   });
 }
