@@ -6,6 +6,9 @@ import 'package:edushare/core/services/auth_service.dart';
 import 'package:edushare/models/user_model.dart';
 import 'package:edushare/views/home/home_screen.dart';
 import 'package:edushare/views/home/search_screen.dart';
+import 'package:edushare/views/bookmarks/saved_resources_screen.dart';
+import 'package:edushare/views/notifications/notifications_screen.dart';
+import 'package:edushare/views/profile/profile_screen.dart';
 import 'package:edushare/views/home/contributor_dashboard_screen.dart';
 import 'package:edushare/views/upload/upload_resource_screen.dart';
 import 'package:edushare/views/upload/my_uploads_screen.dart';
@@ -237,6 +240,24 @@ class _MainShellState extends State<MainShell> {
             icon: Icons.search_outlined,
             selectedIcon: Icons.search_rounded,
             screen: SearchScreen(),
+          ),
+          _TabItem(
+            label: 'Saved',
+            icon: Icons.bookmark_outline_rounded,
+            selectedIcon: Icons.bookmark_rounded,
+            screen: SavedResourcesScreen(),
+          ),
+          _TabItem(
+            label: 'Alerts',
+            icon: Icons.notifications_none_rounded,
+            selectedIcon: Icons.notifications_rounded,
+            screen: NotificationsScreen(),
+          ),
+          _TabItem(
+            label: 'Profile',
+            icon: Icons.person_outline_rounded,
+            selectedIcon: Icons.person_rounded,
+            screen: ProfileScreen(),
           ),
         ];
     }
