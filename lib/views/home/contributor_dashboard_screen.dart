@@ -154,30 +154,8 @@ class _ContributorDashboardScreenState extends State<ContributorDashboardScreen>
                         ),
                       ),
                       const SizedBox(width: 8),
-                      // Top Right Action Buttons: Notification Bell & Profile Button
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          _DashboardNotificationBell(),
-                          const SizedBox(width: 6),
-                          GestureDetector(
-                            onTap: () => _pushAndRefresh(const ProfileScreen()),
-                            child: Container(
-                              width: 40,
-                              height: 40,
-                              decoration: BoxDecoration(
-                                color: AppTheme.primaryColor.withOpacity(0.12),
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Icon(
-                                Icons.person_outline_rounded,
-                                color: AppTheme.primaryColor,
-                                size: 22,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
+                      // Top Right Notification Bell
+                      _DashboardNotificationBell(),
                     ],
                   ),
                 ),

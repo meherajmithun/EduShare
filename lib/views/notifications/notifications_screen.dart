@@ -17,7 +17,6 @@ import 'package:provider/provider.dart';
 import 'package:edushare/core/theme.dart';
 import 'package:edushare/core/services/notification_service.dart';
 import 'package:edushare/models/notification_model.dart';
-import 'package:edushare/widgets/glass_card.dart';
 
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({Key? key}) : super(key: key);
@@ -474,53 +473,9 @@ class _NotificationCard extends StatelessWidget {
                     ),
                 ],
               ),
-              // Optional action button for material-linked notifications
-              if (notification.hasMaterialLink) ...[
-                const SizedBox(height: 10),
-                _ActionButton(
-                  label: notification.materialTitle != null
-                      ? 'View Material ›'
-                      : 'View Details ›',
-                  color: meta.color,
-                ),
-              ],
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _ActionButton extends StatelessWidget {
-  final String label;
-  final Color color;
-
-  const _ActionButton({required this.label, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withOpacity(0.3)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            label,
-            style: TextStyle(
-              color: color,
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(width: 4),
-          Icon(Icons.arrow_forward_ios_rounded, color: color, size: 10),
-        ],
       ),
     );
   }
