@@ -15,7 +15,6 @@ import 'package:edushare/core/services/firestore_service.dart';
 import 'package:edushare/core/services/notification_service.dart';
 import 'package:edushare/models/user_model.dart';
 import 'package:edushare/widgets/glass_card.dart';
-import 'package:edushare/widgets/notification_bell.dart';
 import 'package:edushare/views/upload/upload_resource_screen.dart';
 import 'package:edushare/views/upload/my_uploads_screen.dart';
 import 'package:edushare/views/notifications/notifications_screen.dart';
@@ -128,28 +127,12 @@ class _ContributorDashboardScreenState extends State<ContributorDashboardScreen>
                                     Row(
                                       children: [
                                         Text(
-                                          'DASHBOARD',
+                                          'CONTRIBUTOR DASHBOARD',
                                           style: theme.textTheme.labelLarge?.copyWith(
                                             color: AppTheme.darkTextSecondary,
                                             fontSize: 11,
                                             letterSpacing: 1.2,
                                             fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 6),
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                          decoration: BoxDecoration(
-                                            color: AppTheme.primaryColor.withOpacity(0.2),
-                                            borderRadius: BorderRadius.circular(4),
-                                          ),
-                                          child: const Text(
-                                            'PRO',
-                                            style: TextStyle(
-                                              color: AppTheme.primaryColor,
-                                              fontSize: 9,
-                                              fontWeight: FontWeight.bold,
-                                            ),
                                           ),
                                         ),
                                       ],
@@ -294,14 +277,16 @@ class _ContributorDashboardScreenState extends State<ContributorDashboardScreen>
                                 label: 'Total Uploads',
                                 value: '${_stats?['totalUploads'] ?? 0}',
                                 subtitle: '+${_stats?['pendingUploads'] ?? 0} pending',
+                                onTap: () => _pushAndRefresh(const MyUploadsScreen()),
                               ),
                             ),
                             const SizedBox(width: 10),
                             Expanded(
                               child: _KeyStatCard(
-                                label: 'Total Downloads',
-                                value: _formatCount(_stats?['totalDownloads'] ?? 0),
-                                subtitle: 'via views',
+                                label: 'Total Views',
+                                value: _formatCount(_stats?['totalViews'] ?? _stats?['totalDownloads'] ?? 0),
+                                subtitle: 'total views',
+                                onTap: () => _pushAndRefresh(const MyUploadsScreen()),
                               ),
                             ),
                             const SizedBox(width: 10),
@@ -311,6 +296,7 @@ class _ContributorDashboardScreenState extends State<ContributorDashboardScreen>
                                 value: (_stats?['avgRating'] as num? ?? 0.0).toStringAsFixed(1),
                                 subtitle: '${_stats?['totalRatings'] ?? 0} reviews',
                                 showStar: true,
+                                onTap: () => _pushAndRefresh(const MyUploadsScreen()),
                               ),
                             ),
                           ],
@@ -658,18 +644,20 @@ class _KeyStatCard extends StatelessWidget {
   final String value;
   final String subtitle;
   final bool showStar;
+  final VoidCallback? onTap;
 
   const _KeyStatCard({
     required this.label,
     required this.value,
     required this.subtitle,
     this.showStar = false,
+    this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return GlassCard(
+    Widget card = GlassCard(
       padding: const EdgeInsets.all(12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -706,6 +694,15 @@ class _KeyStatCard extends StatelessWidget {
         ],
       ),
     );
+
+    if (onTap != null) {
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: card,
+      );
+    }
+    return card;
   }
 }
 

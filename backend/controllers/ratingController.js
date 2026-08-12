@@ -115,7 +115,7 @@ const getMyContributorStats = async (req, res) => {
     monthDownloads.push(match?.downloads ?? 0);
   }
 
-  const user = req.user;
+  const user = (await User.findById(userId)) || req.user;
 
   res.json(
     success(
@@ -125,12 +125,13 @@ const getMyContributorStats = async (req, res) => {
         pendingUploads,
         rejectedUploads,
         totalDownloads,
+        totalViews: totalDownloads,
         avgRating: user.avgRating || 0,
         totalRatings: user.totalRatings || 0,
         followerCount,
         monthlyLabels: monthLabels,
         monthlyDownloads: monthDownloads,
-        monthlyViews: monthDownloads, // same data — views used as downloads proxy
+        monthlyViews: monthDownloads,
       },
       'Contributor stats fetched.'
     )
