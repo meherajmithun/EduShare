@@ -15,6 +15,7 @@ import 'package:edushare/views/admin/all_materials_screen.dart';
 import 'package:edushare/views/admin/users_screen.dart';
 import 'package:edushare/views/admin/faculty_admins_screen.dart';
 import 'package:edushare/views/admin/manage_courses_screen.dart';
+import 'package:edushare/views/profile/profile_screen.dart';
 
 // ─── Colour tokens (matching Figma dark palette) ─────────────────────────────
 const _kAmber = Color(0xFFF59E0B);
@@ -577,69 +578,80 @@ class _SuperAdminDashboard extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
                   child: Row(
                     children: [
-                      Container(
-                        width: 48,
-                        height: 48,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: photoUrl == null || photoUrl.isEmpty
-                              ? const LinearGradient(
-                                  colors: [AppTheme.primaryColor, AppTheme.accentColor],
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight)
-                              : null,
-                          image: photoUrl != null && photoUrl.isNotEmpty
-                              ? DecorationImage(
-                                  image: NetworkImage(photoUrl),
-                                  fit: BoxFit.cover,
-                                  onError: (_, __) {})
-                              : null,
-                          border: Border.all(
-                              color: AppTheme.primaryColor.withValues(alpha: 0.5), width: 2),
-                        ),
-                        child: photoUrl == null || photoUrl.isEmpty
-                            ? Center(
-                                child: Text(initials,
-                                    style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.bold)))
-                            : null,
-                      ),
-                      const SizedBox(width: 12),
                       Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Flexible(
-                                  child: Text(name,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: theme.textTheme.titleMedium?.copyWith(
-                                          fontWeight: FontWeight.bold, fontSize: 16)),
+                        child: GestureDetector(
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(builder: (_) => const ProfileScreen()),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 48,
+                                height: 48,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  gradient: photoUrl == null || photoUrl.isEmpty
+                                      ? const LinearGradient(
+                                          colors: [AppTheme.primaryColor, AppTheme.accentColor],
+                                          begin: Alignment.topLeft,
+                                          end: Alignment.bottomRight)
+                                      : null,
+                                  image: photoUrl != null && photoUrl.isNotEmpty
+                                      ? DecorationImage(
+                                          image: NetworkImage(photoUrl),
+                                          fit: BoxFit.cover,
+                                          onError: (_, __) {})
+                                      : null,
+                                  border: Border.all(
+                                      color: AppTheme.primaryColor.withValues(alpha: 0.5), width: 2),
                                 ),
-                                const SizedBox(width: 8),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: AppTheme.primaryColor.withValues(alpha: 0.2),
-                                    borderRadius: BorderRadius.circular(20),
-                                    border: Border.all(
-                                        color: AppTheme.primaryColor.withValues(alpha: 0.5)),
-                                  ),
-                                  child: const Text('SUPER ADMIN',
-                                      style: TextStyle(
-                                          color: _kIndigoLight,
-                                          fontSize: 9,
-                                          fontWeight: FontWeight.bold,
-                                          letterSpacing: 0.5)),
+                                child: photoUrl == null || photoUrl.isEmpty
+                                    ? Center(
+                                        child: Text(initials,
+                                            style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.bold)))
+                                    : null,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Flexible(
+                                          child: Text(name,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: theme.textTheme.titleMedium?.copyWith(
+                                                  fontWeight: FontWeight.bold, fontSize: 16)),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: AppTheme.primaryColor.withValues(alpha: 0.2),
+                                            borderRadius: BorderRadius.circular(20),
+                                            border: Border.all(
+                                                color: AppTheme.primaryColor.withValues(alpha: 0.5)),
+                                          ),
+                                          child: const Text('SUPER ADMIN',
+                                              style: TextStyle(
+                                                  color: _kIndigoLight,
+                                                  fontSize: 9,
+                                                  fontWeight: FontWeight.bold,
+                                                  letterSpacing: 0.5)),
+                                        ),
+                                      ],
+                                    ),
+                                    Text('Platform Overview & Management',
+                                        style: theme.textTheme.bodyMedium?.copyWith(fontSize: 11)),
+                                  ],
                                 ),
-                              ],
-                            ),
-                            Text('Platform Overview & Management',
-                                style: theme.textTheme.bodyMedium?.copyWith(fontSize: 11)),
-                          ],
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                       const NotificationBell(),
@@ -709,15 +721,6 @@ class _SuperAdminDashboard extends StatelessWidget {
                             isDark: isDark,
                             onTap: () => Navigator.of(context).push(
                                 MaterialPageRoute(builder: (_) => const ManageCoursesScreen())),
-                          ),
-                          const SizedBox(width: 10),
-                          _QuickActionTile(
-                            icon: Icons.person_add_alt_1_rounded,
-                            label: 'Invite\nStaff',
-                            color: _kPurple,
-                            isDark: isDark,
-                            onTap: () => Navigator.of(context).push(
-                                MaterialPageRoute(builder: (_) => const FacultyAdminsScreen())),
                           ),
                           const SizedBox(width: 10),
                           _QuickActionTile(
