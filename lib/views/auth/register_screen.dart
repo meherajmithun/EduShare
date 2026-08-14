@@ -26,20 +26,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _designationController = TextEditingController();
   final _studentIdController = TextEditingController();
 
-  String _selectedDepartment = 'Computer Science & Engineering';
+  String _selectedDepartment = '';
   String? _selectedDepartmentId;
   String _selectedRole = 'student';
 
   List<DepartmentModel> _departments = [];
   bool _loadingDepts = true;
-
-  // Static department list (fallback if API fails)
-  final List<String> _staticDepartments = [
-    'Computer Science & Engineering',
-    'Electrical & Electronic Engineering',
-    'Business Administration',
-    'Civil Engineering',
-  ];
+  String? _deptError;
 
   @override
   void initState() {
@@ -54,14 +47,20 @@ class _RegisterScreenState extends State<RegisterScreen> {
         setState(() {
           _departments = depts;
           _loadingDepts = false;
+          _deptError = depts.isEmpty ? 'No active departments available. Please try again later.' : null;
           if (depts.isNotEmpty) {
             _selectedDepartmentId = depts.first.id;
             _selectedDepartment = depts.first.name;
           }
         });
       }
-    } catch (_) {
-      if (mounted) setState(() => _loadingDepts = false);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _loadingDepts = false;
+          _deptError = 'Could not load departments. Please check your connection and try again.';
+        });
+      }
     }
   }
 
@@ -312,6 +311,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                         color: AppTheme.primaryColor),
                                   ),
                                 )
+                              else if (_deptError != null)
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 8),
+                                  child: Text(
+                                    _deptError!,
+                                    style: const TextStyle(
+                                      color: Color(0xFFEF4444),
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                )
                               else if (_departments.isNotEmpty)
                                 DropdownButtonFormField<String>(
                                   value: _selectedDepartmentId,
@@ -345,25 +355,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                   },
                                 )
                               else
-                                DropdownButtonFormField<String>(
-                                  value: _selectedDepartment,
-                                  decoration: const InputDecoration(
-                                    contentPadding: EdgeInsets.symmetric(
-                                        horizontal: 20, vertical: 16),
+                                const Padding(
+                                  padding: EdgeInsets.symmetric(vertical: 8),
+                                  child: Text(
+                                    'No active departments available.',
+                                    style: TextStyle(
+                                      color: Color(0xFFEF4444),
+                                      fontSize: 12,
+                                    ),
                                   ),
-                                  icon: const Icon(Icons.arrow_drop_down_rounded, size: 28),
-                                  items: _staticDepartments.map((dept) {
-                                    return DropdownMenuItem(
-                                      value: dept,
-                                      child: Text(dept,
-                                          style: theme.textTheme.bodyMedium),
-                                    );
-                                  }).toList(),
-                                  onChanged: (val) {
-                                    if (val != null) {
-                                      setState(() => _selectedDepartment = val);
-                                    }
-                                  },
                                 ),
                             ],
                           ),

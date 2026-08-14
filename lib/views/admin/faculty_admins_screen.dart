@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:edushare/core/theme.dart';
 import 'package:edushare/core/services/firestore_service.dart';
 import 'package:edushare/models/user_model.dart';
+import 'package:edushare/models/department_model.dart';
 
 // ─── Colour tokens ────────────────────────────────────────────────────────────
 const _kAmber = Color(0xFFF59E0B);
@@ -33,10 +34,14 @@ class _FacultyAdminsScreenState extends State<FacultyAdminsScreen>
   UserModel? _selectedAdmin;
   final Set<String> _processingIds = {};
 
+  // ── Departments state ──────────────────────────────────────────────────────
+  List<DepartmentModel> _departments = [];
+  bool _loadingDepts = true;
+
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
     _tabController.addListener(() {
       if (!_tabController.indexIsChanging) {
         setState(() => _selectedAdmin = null);
@@ -44,6 +49,7 @@ class _FacultyAdminsScreenState extends State<FacultyAdminsScreen>
     });
     _loadPending();
     _loadAll();
+    _loadDepartments();
   }
 
   @override
@@ -76,6 +82,20 @@ class _FacultyAdminsScreenState extends State<FacultyAdminsScreen>
       }
     } catch (_) {
       if (mounted) setState(() => _loadingAll = false);
+    }
+  }
+
+  Future<void> _loadDepartments() async {
+    try {
+      final list = await _service.getAllDepartmentsAdmin();
+      if (mounted) {
+        setState(() {
+          _departments = list;
+          _loadingDepts = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingDepts = false);
     }
   }
 
@@ -275,6 +295,208 @@ class _FacultyAdminsScreenState extends State<FacultyAdminsScreen>
     ));
   }
 
+  // ── Department Actions & Dialogs ──────────────────────────────────────────
+
+  Future<void> _showCreateDeptDialog() async {
+    final nameCtrl = TextEditingController();
+    final codeCtrl = TextEditingController();
+    final descCtrl = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+
+    final created = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Add Department', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: Form(
+          key: formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextFormField(
+                  controller: nameCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Department Name *',
+                    hintText: 'e.g. Civil Engineering',
+                  ),
+                  validator: (v) => (v == null || v.trim().isEmpty) ? 'Name is required' : null,
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: codeCtrl,
+                  textCapitalization: TextCapitalization.characters,
+                  decoration: const InputDecoration(
+                    labelText: 'Code *',
+                    hintText: 'e.g. CE',
+                  ),
+                  validator: (v) => (v == null || v.trim().isEmpty) ? 'Code is required' : null,
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: descCtrl,
+                  maxLines: 2,
+                  decoration: const InputDecoration(
+                    labelText: 'Description (Optional)',
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryColor),
+            onPressed: () async {
+              if (!formKey.currentState!.validate()) return;
+              try {
+                await _service.createDepartmentAdmin(
+                  name: nameCtrl.text.trim(),
+                  code: codeCtrl.text.trim().toUpperCase(),
+                  description: descCtrl.text.trim(),
+                );
+                if (ctx.mounted) Navigator.pop(ctx, true);
+              } catch (e) {
+                if (ctx.mounted) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    SnackBar(content: Text('Failed: $e'), backgroundColor: _kRed),
+                  );
+                }
+              }
+            },
+            child: const Text('Create', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    nameCtrl.dispose();
+    codeCtrl.dispose();
+    descCtrl.dispose();
+
+    if (created == true) {
+      _showSnack('Department created successfully.', _kGreen);
+      _loadDepartments();
+    }
+  }
+
+  Future<void> _showEditDeptDialog(DepartmentModel dept) async {
+    final nameCtrl = TextEditingController(text: dept.name);
+    final codeCtrl = TextEditingController(text: dept.code);
+    final descCtrl = TextEditingController(text: dept.description);
+    final formKey = GlobalKey<FormState>();
+
+    final updated = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Edit Department', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: Form(
+          key: formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextFormField(
+                  controller: nameCtrl,
+                  decoration: const InputDecoration(labelText: 'Department Name *'),
+                  validator: (v) => (v == null || v.trim().isEmpty) ? 'Name is required' : null,
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: codeCtrl,
+                  textCapitalization: TextCapitalization.characters,
+                  decoration: const InputDecoration(labelText: 'Code *'),
+                  validator: (v) => (v == null || v.trim().isEmpty) ? 'Code is required' : null,
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: descCtrl,
+                  maxLines: 2,
+                  decoration: const InputDecoration(labelText: 'Description (Optional)'),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryColor),
+            onPressed: () async {
+              if (!formKey.currentState!.validate()) return;
+              try {
+                await _service.updateDepartmentAdmin(
+                  dept.id,
+                  name: nameCtrl.text.trim(),
+                  code: codeCtrl.text.trim().toUpperCase(),
+                  description: descCtrl.text.trim(),
+                );
+                if (ctx.mounted) Navigator.pop(ctx, true);
+              } catch (e) {
+                if (ctx.mounted) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    SnackBar(content: Text('Failed: $e'), backgroundColor: _kRed),
+                  );
+                }
+              }
+            },
+            child: const Text('Save', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    nameCtrl.dispose();
+    codeCtrl.dispose();
+    descCtrl.dispose();
+
+    if (updated == true) {
+      _showSnack('Department updated.', _kGreen);
+      _loadDepartments();
+    }
+  }
+
+  Future<void> _toggleDeptActive(DepartmentModel dept) async {
+    try {
+      if (dept.isActive) {
+        await _service.deactivateDepartmentAdmin(dept.id);
+        _showSnack('${dept.name} deactivated.', _kAmber);
+      } else {
+        await _service.activateDepartmentAdmin(dept.id);
+        _showSnack('${dept.name} activated.', _kGreen);
+      }
+      _loadDepartments();
+    } catch (e) {
+      _showSnack('Failed: $e', _kRed);
+    }
+  }
+
+  Future<void> _deleteDept(DepartmentModel dept) async {
+    final ok = await _confirmDialog(
+      'Delete Department',
+      'Permanently delete "${dept.name}"? Courses and users in this department may be affected.',
+      label: 'Delete',
+      color: _kRed,
+    );
+    if (!ok) return;
+
+    try {
+      await _service.deleteDepartmentAdmin(dept.id);
+      _showSnack('${dept.name} deleted.', _kRed);
+      _loadDepartments();
+    } catch (e) {
+      _showSnack('Failed: $e', _kRed);
+    }
+  }
+
   // ── Build ──────────────────────────────────────────────────────────────────
 
   @override
@@ -422,8 +644,8 @@ class _FacultyAdminsScreenState extends State<FacultyAdminsScreen>
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           const Icon(Icons.hourglass_top_rounded, size: 14),
-                          const SizedBox(width: 6),
-                          Text('Pending (${_pending.length})'),
+                          const SizedBox(width: 4),
+                          Text('Pending (${_pending.length})', style: const TextStyle(fontSize: 12)),
                         ],
                       ),
                     ),
@@ -432,8 +654,18 @@ class _FacultyAdminsScreenState extends State<FacultyAdminsScreen>
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           const Icon(Icons.people_rounded, size: 14),
-                          const SizedBox(width: 6),
-                          Text('All (${_all.length})'),
+                          const SizedBox(width: 4),
+                          Text('All (${_all.length})', style: const TextStyle(fontSize: 12)),
+                        ],
+                      ),
+                    ),
+                    Tab(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.domain_rounded, size: 14),
+                          const SizedBox(width: 4),
+                          Text('Depts (${_departments.length})', style: const TextStyle(fontSize: 12)),
                         ],
                       ),
                     ),
@@ -478,6 +710,17 @@ class _FacultyAdminsScreenState extends State<FacultyAdminsScreen>
                     onActivate: _activate,
                     onDelete: _delete,
                     onRefresh: _loadAll,
+                  ),
+                  // DEPARTMENTS TAB
+                  _DepartmentsTab(
+                    departments: _departments,
+                    isLoading: _loadingDepts,
+                    isDark: isDark,
+                    onRefresh: _loadDepartments,
+                    onCreateDept: _showCreateDeptDialog,
+                    onEditDept: _showEditDeptDialog,
+                    onToggleActive: _toggleDeptActive,
+                    onDeleteDept: _deleteDept,
                   ),
                 ],
               ),
@@ -1325,3 +1568,192 @@ class _EmptyState extends StatelessWidget {
     );
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DEPARTMENTS TAB
+// ─────────────────────────────────────────────────────────────────────────────
+class _DepartmentsTab extends StatelessWidget {
+  final List<DepartmentModel> departments;
+  final bool isLoading;
+  final bool isDark;
+  final Future<void> Function() onRefresh;
+  final VoidCallback onCreateDept;
+  final void Function(DepartmentModel) onEditDept;
+  final void Function(DepartmentModel) onToggleActive;
+  final void Function(DepartmentModel) onDeleteDept;
+
+  const _DepartmentsTab({
+    required this.departments,
+    required this.isLoading,
+    required this.isDark,
+    required this.onRefresh,
+    required this.onCreateDept,
+    required this.onEditDept,
+    required this.onToggleActive,
+    required this.onDeleteDept,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    if (isLoading) {
+      return const Center(
+        child: CircularProgressIndicator(color: AppTheme.primaryColor),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: onRefresh,
+      color: AppTheme.primaryColor,
+      child: ListView(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        children: [
+          // Header action
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                '${departments.length} Department${departments.length == 1 ? '' : 's'}',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+                ),
+              ),
+              ElevatedButton.icon(
+                onPressed: onCreateDept,
+                icon: const Icon(Icons.add_rounded, size: 18),
+                label: const Text('Add Dept', style: TextStyle(fontWeight: FontWeight.bold)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primaryColor,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          if (departments.isEmpty)
+            _EmptyState(
+              icon: Icons.domain_disabled_rounded,
+              title: 'No Departments Found',
+              subtitle: 'Click "Add Dept" above to create the first department.',
+              isDark: isDark,
+            )
+          else
+            ...departments.map((dept) => _buildDeptCard(context, dept)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDeptCard(BuildContext context, DepartmentModel dept) {
+    final theme = Theme.of(context);
+    final isActive = dept.isActive;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: isDark ? AppTheme.darkCard : AppTheme.lightCard,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryColor.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    dept.code,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                      color: AppTheme.primaryColor,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: (isActive ? _kGreen : _kRed).withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        isActive ? Icons.check_circle_outline_rounded : Icons.pause_circle_outline_rounded,
+                        size: 12,
+                        color: isActive ? _kGreen : _kRed,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        isActive ? 'Active' : 'Inactive',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: isActive ? _kGreen : _kRed,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.edit_outlined, size: 18),
+                  tooltip: 'Edit Department',
+                  onPressed: () => onEditDept(dept),
+                ),
+                IconButton(
+                  icon: Icon(
+                    isActive ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                    size: 18,
+                    color: isActive ? _kAmber : _kGreen,
+                  ),
+                  tooltip: isActive ? 'Deactivate' : 'Activate',
+                  onPressed: () => onToggleActive(dept),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete_outline_rounded, size: 18, color: _kRed),
+                  tooltip: 'Delete',
+                  onPressed: () => onDeleteDept(dept),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              dept.name,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            if (dept.description.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                dept.description,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontSize: 13,
+                  color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+

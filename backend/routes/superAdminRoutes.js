@@ -17,6 +17,14 @@ const {
   getSuperAdminStats,
   getAllUsers,
 } = require('../controllers/superAdminController');
+const {
+  getAllDepartments,
+  createDepartment,
+  updateDepartment,
+  activateDepartment,
+  deactivateDepartment,
+  deleteDepartment,
+} = require('../controllers/departmentController');
 const { protect } = require('../middleware/auth');
 const roleGuard = require('../middleware/roleGuard');
 
@@ -37,5 +45,13 @@ router.put('/faculty-admins/:id/reject', rejectFacultyAdmin);
 router.put('/faculty-admins/:id/disable', disableFacultyAdmin);
 router.put('/faculty-admins/:id/enable', enableFacultyAdmin);
 router.delete('/faculty-admins/:id', deleteFacultyAdmin);
+
+// ─── Department management ────────────────────────────────────────────────
+router.get('/departments', getAllDepartments);
+router.post('/departments', createDepartment);
+router.put('/departments/:id', updateDepartment);
+router.put('/departments/:id/activate', activateDepartment);
+router.put('/departments/:id/deactivate', deactivateDepartment);
+router.delete('/departments/:id', deleteDepartment);
 
 module.exports = router;

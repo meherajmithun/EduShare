@@ -185,4 +185,4 @@ const deleteFile = async (publicId, resourceType = 'raw') => {
   }
 };
 
-module.exports = { upload, uploadDoc, uploadVideo, smartUpload, uploadBuffer, uploadVideoBuffer, deleteFile };
+module.exports = { upload, uploadDoc, uploadVideo, smartUpload, uploadMaterialFile, uploadBuffer, uploadVideoBuffer, deleteFile };

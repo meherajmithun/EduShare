@@ -1,5 +1,12 @@
 /**
  * models/Department.js — Mongoose schema for academic departments
+ *
+ * isActive controls whether the department appears in:
+ *  - Public GET /api/departments (used by register screen)
+ *  - Contributor upload course picker
+ *  - Admin signup dropdown
+ *
+ * Super Admin can activate/deactivate departments at any time.
  */
 
 const mongoose = require('mongoose');
@@ -23,6 +30,11 @@ const departmentSchema = new mongoose.Schema(
       type: String,
       trim: true,
       default: '',
+    },
+    // Controls visibility in public lists (register, contributor upload)
+    isActive: {
+      type: Boolean,
+      default: true,
     },
   },
   {

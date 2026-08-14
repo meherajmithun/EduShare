@@ -40,11 +40,65 @@ class FirestoreService {
     await _api.delete('/api/users/$userId');
   }
 
-  // ─── Departments ──────────────────────────────────────────────────────
+  // ─── Departments ────────────────────────────────────────────────
 
+  /// Public endpoint — no auth required. Returns only ACTIVE departments.
+  /// Used by register screen (pre-login) and contributor upload form.
   Future<List<DepartmentModel>> getDepartments() async {
-    final data = await _api.get('/api/departments') as List<dynamic>;
+    final data = await _api.get('/api/departments', auth: false) as List<dynamic>;
     return data.map((e) => DepartmentModel.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  /// Super Admin — fetch ALL departments (active + inactive) for management.
+  Future<List<DepartmentModel>> getAllDepartmentsAdmin() async {
+    final data = await _api.get('/api/super-admin/departments') as List<dynamic>;
+    return data.map((e) => DepartmentModel.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  /// Super Admin — create a new department.
+  Future<DepartmentModel> createDepartmentAdmin({
+    required String name,
+    required String code,
+    String description = '',
+  }) async {
+    final data = await _api.post('/api/super-admin/departments', {
+      'name': name,
+      'code': code,
+      'description': description,
+    });
+    return DepartmentModel.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// Super Admin — update an existing department.
+  Future<DepartmentModel> updateDepartmentAdmin(
+    String departmentId, {
+    required String name,
+    required String code,
+    String description = '',
+  }) async {
+    final data = await _api.put('/api/super-admin/departments/$departmentId', {
+      'name': name,
+      'code': code,
+      'description': description,
+    });
+    return DepartmentModel.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// Super Admin — activate a department (makes it visible in signup/upload).
+  Future<DepartmentModel> activateDepartmentAdmin(String departmentId) async {
+    final data = await _api.put('/api/super-admin/departments/$departmentId/activate', {});
+    return DepartmentModel.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// Super Admin — deactivate a department (hides it from signup/upload).
+  Future<DepartmentModel> deactivateDepartmentAdmin(String departmentId) async {
+    final data = await _api.put('/api/super-admin/departments/$departmentId/deactivate', {});
+    return DepartmentModel.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// Super Admin — permanently delete a department.
+  Future<void> deleteDepartmentAdmin(String departmentId) async {
+    await _api.delete('/api/super-admin/departments/$departmentId');
   }
 
   // ─── Courses ──────────────────────────────────────────────────────────
