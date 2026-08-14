@@ -13,18 +13,11 @@ const {
 } = require('../controllers/materialController');
 const { protect } = require('../middleware/auth');
 const roleGuard = require('../middleware/roleGuard');
-const { uploadDoc, uploadVideo } = require('../services/cloudinaryService');
+const { uploadMaterialFile } = require('../services/cloudinaryService');
 
-// ─── Smart multer middleware ───────────────────────────────────────────
-// We cannot inspect req.body before multer runs on multipart/form-data.
-// Strategy: use uploadVideo for the upload route since it accepts both
-// video files AND documents (the file filter allows octet-stream which
-// covers all cases). The controller then applies the correct Cloudinary
-// resource_type based on type + videoSource fields.
-//
-// For YouTube videos, no file is uploaded at all — multer still runs but
-// req.file will be undefined (which is fine).
-const uploadMiddleware = uploadVideo.single('file');
+// ─── Universal upload middleware ─────────────────────────────────────────
+// Accepts documents, PDFs, images, and videos.
+const uploadMiddleware = uploadMaterialFile.single('file');
 
 // IMPORTANT: /my must come before /:id to avoid route conflict
 router.get(

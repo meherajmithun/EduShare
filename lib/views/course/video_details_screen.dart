@@ -83,6 +83,26 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
     _loadComments();
     _loadRatings();
     _incrementView();
+    _recordInitialWatch();
+  }
+
+  void _recordInitialWatch() async {
+    final cId = widget.course.id.isNotEmpty
+        ? widget.course.id
+        : (_currentVideo.courseId.isNotEmpty ? _currentVideo.courseId : 'course');
+    if (cId.isNotEmpty && _currentVideo.id.isNotEmpty) {
+      final savedProg = _progressMap[_currentVideo.id];
+      final startPos = (savedProg?['lastPosition'] as num?)?.toInt() ?? 0;
+      final dur = (savedProg?['duration'] as num?)?.toInt() ?? 0;
+      final isComp = savedProg?['completed'] == true;
+      await _firestoreService.saveVideoProgress(
+        materialId: _currentVideo.id,
+        courseId: cId,
+        lastPosition: startPos,
+        duration: dur,
+        completed: isComp,
+      );
+    }
   }
 
   void _incrementView() async {
@@ -282,9 +302,13 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
       };
     });
 
+    final cId = widget.course.id.isNotEmpty
+        ? widget.course.id
+        : (_currentVideo.courseId.isNotEmpty ? _currentVideo.courseId : 'course');
+
     _firestoreService.saveVideoProgress(
       materialId: _currentVideo.id,
-      courseId: widget.course.id,
+      courseId: cId,
       lastPosition: pos,
       duration: dur,
       completed: isCompleted,
@@ -311,6 +335,7 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
     _loadComments();
     _loadRatings();
     _incrementView();
+    _recordInitialWatch();
   }
 
   void _retryPlayer() {

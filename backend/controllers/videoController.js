@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Material = require('../models/Material');
 const VideoProgress = require('../models/VideoProgress');
 const VideoBookmark = require('../models/VideoBookmark');
@@ -18,9 +19,20 @@ const incrementViewCount = async (req, res) => {
 
 // ─── POST /api/videos/progress ─────────────────────────────────────────
 const saveProgress = async (req, res) => {
-  const { materialId, courseId, lastPosition, duration, completed } = req.body;
-  if (!materialId || !courseId) {
-    throw createError('materialId and courseId are required', 400);
+  let { materialId, courseId, lastPosition, duration, completed } = req.body;
+  if (!materialId) {
+    throw createError('materialId is required', 400);
+  }
+
+  if (!courseId || !mongoose.isValidObjectId(courseId)) {
+    const mat = await Material.findById(materialId);
+    if (mat && mat.courseId) {
+      courseId = mat.courseId;
+    }
+  }
+
+  if (!courseId || !mongoose.isValidObjectId(courseId)) {
+    throw createError('Valid courseId or material with course is required', 400);
   }
 
   const pos = Number(lastPosition) || 0;

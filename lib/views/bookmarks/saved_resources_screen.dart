@@ -22,6 +22,7 @@ class _SavedResourcesScreenState extends State<SavedResourcesScreen> {
 
   List<MaterialModel> _allSavedMaterials = [];
   List<MaterialModel> _filteredMaterials = [];
+  List<Map<String, dynamic>> _continueWatchingItems = [];
   bool _isLoading = true;
   String _selectedCategory = 'All';
   String? _selectedFolder;
@@ -77,11 +78,13 @@ class _SavedResourcesScreenState extends State<SavedResourcesScreen> {
     try {
       final materials = await _firestoreService.getMaterials();
       final saved = materials.where((m) => m.isApproved).toList();
+      final continueList = await _firestoreService.getContinueWatching();
 
       if (mounted) {
         setState(() {
           _allSavedMaterials = saved;
           _filteredMaterials = _allSavedMaterials;
+          _continueWatchingItems = continueList;
           _isLoading = false;
         });
       }
@@ -90,6 +93,7 @@ class _SavedResourcesScreenState extends State<SavedResourcesScreen> {
         setState(() {
           _allSavedMaterials = [];
           _filteredMaterials = [];
+          _continueWatchingItems = [];
           _isLoading = false;
         });
       }
@@ -110,13 +114,48 @@ class _SavedResourcesScreenState extends State<SavedResourcesScreen> {
     });
   }
 
+  void _openContinueWatching(Map<String, dynamic> item) async {
+    final matJson = item['material'];
+    final courseJson = item['course'];
+    if (matJson == null) return;
+
+    final videoMat = MaterialModel.fromJson(matJson as Map<String, dynamic>);
+    final course = courseJson != null
+        ? CourseModel.fromJson(courseJson as Map<String, dynamic>)
+        : CourseModel(
+            id: videoMat.courseId.isNotEmpty ? videoMat.courseId : 'course',
+            name: videoMat.department.isNotEmpty ? videoMat.department : 'Course',
+            code: videoMat.courseId.isNotEmpty ? videoMat.courseId : (videoMat.department.isNotEmpty ? videoMat.department : 'COURSE'),
+            departmentId: videoMat.departmentId,
+          );
+
+    final allVideos = await _firestoreService.getApprovedMaterials(course.id, type: 'video');
+    final allNotes = await _firestoreService.getApprovedMaterials(course.id, type: 'notes');
+    final allAssignments = await _firestoreService.getApprovedMaterials(course.id, type: 'assignment');
+
+    if (!mounted) return;
+
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => VideoDetailsScreen(
+          course: course,
+          allCourseVideos: allVideos.isNotEmpty ? allVideos : [videoMat],
+          initialVideo: videoMat,
+          courseResources: [...allNotes, ...allAssignments],
+        ),
+      ),
+    );
+
+    _loadSavedResources();
+  }
+
   void _launchMaterial(MaterialModel m) {
     if (m.type == 'video' || m.videoPlaybackUrl != null || m.isYouTube || m.isCloudinaryVideo) {
       final course = CourseModel(
-        id: m.courseId.isNotEmpty ? m.courseId : 'cs245',
-        name: m.department.isNotEmpty ? m.department : 'Database Systems',
-        code: 'CS245',
-        departmentId: m.departmentId.isNotEmpty ? m.departmentId : 'cse',
+        id: m.courseId.isNotEmpty ? m.courseId : 'course',
+        name: m.department.isNotEmpty ? m.department : 'Course',
+        code: m.courseId.isNotEmpty ? m.courseId : (m.department.isNotEmpty ? m.department : 'COURSE'),
+        departmentId: m.departmentId.isNotEmpty ? m.departmentId : '',
       );
       Navigator.of(context).push(
         MaterialPageRoute(
@@ -126,7 +165,7 @@ class _SavedResourcesScreenState extends State<SavedResourcesScreen> {
             initialVideo: m,
           ),
         ),
-      );
+      ).then((_) => _loadSavedResources());
     } else if (m.fileUrl != null && m.fileUrl!.isNotEmpty) {
       Navigator.of(context).push(
         MaterialPageRoute(
@@ -279,126 +318,165 @@ class _SavedResourcesScreenState extends State<SavedResourcesScreen> {
                   ),
                   const SizedBox(height: 20),
 
-                  // Continue Reading Section
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'CONTINUE READING',
-                        style: TextStyle(
-                          color: AppTheme.darkTextSecondary,
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 1.2,
-                        ),
-                      ),
-                      GestureDetector(
-                        onTap: () {
-                          if (_allSavedMaterials.isNotEmpty) _launchMaterial(_allSavedMaterials.first);
-                        },
-                        child: const Text(
-                          'Resume',
-                          style: TextStyle(
-                            color: AppTheme.primaryColor,
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  // Continue Reading Glass Card
-                  GestureDetector(
-                    onTap: () {
-                      if (_allSavedMaterials.isNotEmpty) _launchMaterial(_allSavedMaterials.first);
-                    },
-                    child: Container(
-                      width: double.infinity,
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [
-                            const Color(0xFF1E293B),
-                            AppTheme.primaryDark.withOpacity(0.8),
-                          ],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: AppTheme.primaryColor.withOpacity(0.3),
-                        ),
-                      ),
-                      padding: const EdgeInsets.all(16),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 44,
-                            height: 44,
-                            decoration: BoxDecoration(
-                              color: AppTheme.primaryColor.withOpacity(0.2),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: const Center(
-                              child: Text(
-                                'PDF',
-                                style: TextStyle(
-                                  color: AppTheme.primaryColor,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 11,
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                  // Continue Watching Section
+                  if (_continueWatchingItems.isNotEmpty) ...[
+                    Builder(
+                      builder: (context) {
+                        final item = _continueWatchingItems.first;
+                        final matJson = item['material'] as Map<String, dynamic>?;
+                        final courseJson = item['course'] as Map<String, dynamic>?;
+                        final progJson = item['progress'] as Map<String, dynamic>?;
+
+                        final title = matJson?['title'] as String? ?? 'In Progress Video';
+                        final courseCode = courseJson?['code'] as String? ??
+                            (matJson?['courseId'] as String? ?? '');
+                        final courseName = courseJson?['name'] as String? ??
+                            (matJson?['department'] as String? ?? 'Course');
+                        final duration = (progJson?['duration'] as num?)?.toDouble() ?? 0;
+                        final lastPosition = (progJson?['lastPosition'] as num?)?.toDouble() ?? 0;
+                        final progressVal = duration > 0 ? (lastPosition / duration).clamp(0.0, 1.0) : 0.0;
+                        final isVideo = (matJson?['type'] as String? ?? 'video').toLowerCase() == 'video';
+
+                        String subtitle;
+                        if (courseCode.isNotEmpty) {
+                          subtitle = duration > 0
+                              ? '$courseCode • ${(progressVal * 100).toInt()}% COMPLETED'
+                              : '$courseCode • IN PROGRESS';
+                        } else {
+                          subtitle = duration > 0
+                              ? '$courseName • ${(progressVal * 100).toInt()}% COMPLETED'
+                              : '$courseName • IN PROGRESS';
+                        }
+
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 const Text(
-                                  'CS245 • PAGE 14 OF 28',
+                                  'CONTINUE WATCHING',
                                   style: TextStyle(
-                                    color: AppTheme.primaryColor,
-                                    fontSize: 10,
+                                    color: AppTheme.darkTextSecondary,
+                                    fontSize: 11,
                                     fontWeight: FontWeight.bold,
+                                    letterSpacing: 1.2,
                                   ),
                                 ),
-                                const SizedBox(height: 3),
-                                const Text(
-                                  'Database Normalization Guide',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(4),
-                                  child: const LinearProgressIndicator(
-                                    value: 0.5,
-                                    backgroundColor: Colors.white12,
-                                    color: AppTheme.primaryColor,
-                                    minHeight: 4,
+                                GestureDetector(
+                                  onTap: () => _openContinueWatching(item),
+                                  child: const Text(
+                                    'Resume',
+                                    style: TextStyle(
+                                      color: AppTheme.primaryColor,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                    ),
                                   ),
                                 ),
                               ],
                             ),
-                          ),
-                          const SizedBox(width: 10),
-                          Container(
-                            padding: const EdgeInsets.all(10),
-                            decoration: const BoxDecoration(
-                              color: AppTheme.primaryColor,
-                              shape: BoxShape.circle,
+                            const SizedBox(height: 10),
+                            GestureDetector(
+                              onTap: () => _openContinueWatching(item),
+                              child: Container(
+                                width: double.infinity,
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    colors: [
+                                      const Color(0xFF1E293B),
+                                      AppTheme.primaryDark.withOpacity(0.8),
+                                    ],
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
+                                  ),
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(
+                                    color: AppTheme.primaryColor.withOpacity(0.3),
+                                  ),
+                                ),
+                                padding: const EdgeInsets.all(16),
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      width: 44,
+                                      height: 44,
+                                      decoration: BoxDecoration(
+                                        color: AppTheme.primaryColor.withOpacity(0.2),
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      child: Center(
+                                        child: isVideo
+                                            ? const Icon(Icons.play_circle_fill_rounded,
+                                                color: AppTheme.primaryColor, size: 24)
+                                            : const Text(
+                                                'PDF',
+                                                style: TextStyle(
+                                                  color: AppTheme.primaryColor,
+                                                  fontWeight: FontWeight.bold,
+                                                  fontSize: 11,
+                                                ),
+                                              ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 14),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            subtitle,
+                                            style: const TextStyle(
+                                              color: AppTheme.primaryColor,
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                          const SizedBox(height: 3),
+                                          Text(
+                                            title,
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                          const SizedBox(height: 8),
+                                          ClipRRect(
+                                            borderRadius: BorderRadius.circular(4),
+                                            child: LinearProgressIndicator(
+                                              value: progressVal > 0 ? progressVal : 0.05,
+                                              backgroundColor: Colors.white12,
+                                              color: AppTheme.primaryColor,
+                                              minHeight: 4,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Container(
+                                      padding: const EdgeInsets.all(10),
+                                      decoration: const BoxDecoration(
+                                        color: AppTheme.primaryColor,
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 20),
+                                    ),
+                                  ],
+                                ),
+                              ),
                             ),
-                            child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 20),
-                          ),
-                        ],
-                      ),
+                            const SizedBox(height: 24),
+                          ],
+                        );
+                      },
                     ),
-                  ),
-                  const SizedBox(height: 24),
+                  ],
 
                   // Folders Section
                   Row(
@@ -756,7 +834,7 @@ class _SavedItemCardState extends State<_SavedItemCard> {
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: Text(
-                          '${m.courseId.isNotEmpty ? m.courseId.toUpperCase() : "CS245"} • ${m.type.toUpperCase()}',
+                          '${m.courseId.isNotEmpty ? m.courseId.toUpperCase() : (m.department.isNotEmpty ? m.department.toUpperCase() : "RESOURCE")} • ${m.type.toUpperCase()}',
                           style: TextStyle(
                             color: badgeColor,
                             fontSize: 9,

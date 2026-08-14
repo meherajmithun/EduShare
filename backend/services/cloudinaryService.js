@@ -25,7 +25,7 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// ─── Allowed mime types ─────────────────────────────────────────────────
+// ─── Allowed mime types & extensions ──────────────────────────────────────
 
 const ALLOWED_DOC_MIMES = [
   'application/pdf',
@@ -36,14 +36,18 @@ const ALLOWED_DOC_MIMES = [
   'text/x-pdf',
   'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'text/plain',
   'image/jpeg',
   'image/jpg',
   'image/png',
   'image/webp',
+  'image/gif',
   'application/octet-stream',
 ];
 
-const ALLOWED_DOC_EXTENSIONS = ['.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png', '.webp'];
+const ALLOWED_DOC_EXTENSIONS = ['.pdf', '.doc', '.docx', '.ppt', '.pptx', '.txt', '.jpg', '.jpeg', '.png', '.webp', '.gif'];
 
 const ALLOWED_VIDEO_MIMES = [
   'video/mp4',
@@ -60,19 +64,45 @@ const ALLOWED_VIDEO_MIMES = [
 
 const ALLOWED_VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.mov', '.avi', '.webm', '.mpeg', '.ogv', '.3gp', '.flv'];
 
-// ─── Multer — Document/PDF (20 MB) ────────────────────────────────────
-const uploadDoc = multer({
+const ALL_ALLOWED_EXTENSIONS = [...ALLOWED_DOC_EXTENSIONS, ...ALLOWED_VIDEO_EXTENSIONS];
+const ALL_ALLOWED_MIMES = [...ALLOWED_DOC_MIMES, ...ALLOWED_VIDEO_MIMES];
+
+// ─── Multer — Universal Material Upload (200 MB) ─────────────────────────
+// Accepts documents, PDFs, images, and videos for academic materials.
+const uploadMaterialFile = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB
+  limits: { fileSize: 200 * 1024 * 1024 }, // 200 MB
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname || '').toLowerCase();
-    const isAllowedExt = ALLOWED_DOC_EXTENSIONS.includes(ext);
-    const isAllowedMime = ALLOWED_DOC_MIMES.includes(file.mimetype);
+    const isAllowedExt = ALL_ALLOWED_EXTENSIONS.includes(ext);
+    const isAllowedMime = ALL_ALLOWED_MIMES.includes(file.mimetype) ||
+        file.mimetype.startsWith('image/') ||
+        file.mimetype.startsWith('video/') ||
+        file.mimetype === 'application/octet-stream';
 
     if (isAllowedExt || isAllowedMime) {
       cb(null, true);
     } else {
-      cb(new Error('File type not supported. Allowed: PDF, DOC, DOCX, JPG, PNG.'), false);
+      cb(new Error(`File type not supported. Allowed: PDF, DOC, DOCX, JPG, PNG, WEBP, MP4, MOV, MKV. (Received: ${ext || file.mimetype})`), false);
+    }
+  },
+});
+
+// ─── Multer — Document/PDF/Image (50 MB) ─────────────────────────────────
+const uploadDoc = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    const isAllowedExt = ALLOWED_DOC_EXTENSIONS.includes(ext);
+    const isAllowedMime = ALLOWED_DOC_MIMES.includes(file.mimetype) ||
+        file.mimetype.startsWith('image/') ||
+        file.mimetype === 'application/octet-stream';
+
+    if (isAllowedExt || isAllowedMime) {
+      cb(null, true);
+    } else {
+      cb(new Error('File type not supported. Allowed: PDF, DOC, DOCX, JPG, PNG, WEBP.'), false);
     }
   },
 });
@@ -84,7 +114,9 @@ const uploadVideo = multer({
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname || '').toLowerCase();
     const isAllowedExt = ALLOWED_VIDEO_EXTENSIONS.includes(ext);
-    const isAllowedMime = ALLOWED_VIDEO_MIMES.includes(file.mimetype);
+    const isAllowedMime = ALLOWED_VIDEO_MIMES.includes(file.mimetype) ||
+        file.mimetype.startsWith('video/') ||
+        file.mimetype === 'application/octet-stream';
 
     if (isAllowedExt || isAllowedMime) {
       cb(null, true);
@@ -94,23 +126,12 @@ const uploadVideo = multer({
   },
 });
 
-// Backward-compatible alias (used by existing routes)
-const upload = uploadDoc;
-
-// ─── Smart middleware: picks uploadVideo or uploadDoc based on type field ──
-// Must be used as a function factory since multer needs to be called per request.
-const smartUpload = (req, res, next) => {
-  // Peek at the multipart type field before multer runs.
-  // We use a raw multipart parser to read the first few fields.
-  // Simpler approach: always read the type from req.body after multer, but
-  // multer must run first to populate req.body for multipart.
-  // Solution: use uploadVideo for all — it accepts a wider set and higher limit.
-  // For doc-only routes use uploadDoc explicitly.
-  uploadVideo.single('file')(req, res, next);
-};
+// Backward-compatible alias
+const upload = uploadMaterialFile;
+const smartUpload = uploadMaterialFile;
 
 /**
- * Stream a Buffer to Cloudinary as a document/raw resource.
+ * Stream a Buffer to Cloudinary as an auto resource (PDFs, docs, images).
  * @param {Buffer} buffer
  * @param {string} [folder]
  * @param {string} [publicId]  Optional custom public_id
@@ -118,7 +139,7 @@ const smartUpload = (req, res, next) => {
  */
 const uploadBuffer = (buffer, folder = 'edushare/materials', publicId) => {
   return new Promise((resolve, reject) => {
-    const opts = { folder, resource_type: 'raw' };
+    const opts = { folder, resource_type: 'auto' };
     if (publicId) opts.public_id = publicId;
 
     const uploadStream = cloudinary.uploader.upload_stream(opts, (error, result) => {

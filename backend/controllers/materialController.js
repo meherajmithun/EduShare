@@ -126,16 +126,17 @@ const createMaterial = async (req, res) => {
     throw createError('type must be notes, assignment, video, or pdf.', 400);
   }
 
+  let effectiveVideoSource = videoSource;
   // Validate based on type / videoSource combination
   if (type === 'video') {
-    if (!videoSource || !['youtube', 'cloudinary'].includes(videoSource)) {
-      throw createError('videoSource must be "youtube" or "cloudinary" for video type.', 400);
+    if (!effectiveVideoSource && req.file) {
+      effectiveVideoSource = 'cloudinary';
     }
-    if (videoSource === 'youtube' && !videoLink) {
+    if (effectiveVideoSource === 'youtube' && !videoLink) {
       throw createError('A YouTube URL is required when videoSource is "youtube".', 400);
     }
-    if (videoSource === 'cloudinary' && !req.file) {
-      throw createError('A video file is required when videoSource is "cloudinary".', 400);
+    if (effectiveVideoSource !== 'youtube' && !req.file) {
+      throw createError('A video file is required for video upload.', 400);
     }
   } else {
     // notes, assignment, pdf — all require a file

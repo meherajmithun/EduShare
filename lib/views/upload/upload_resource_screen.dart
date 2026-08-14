@@ -1,3 +1,5 @@
+import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
@@ -23,14 +25,13 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
   final _formKey = GlobalKey<FormState>();
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
-  final _linkController = TextEditingController();
 
   final FirestoreService _firestoreService = FirestoreService();
 
   /// 'notes' | 'assignment' | 'video' | 'pdf'
   String _selectedType = 'notes';
 
-  /// For video type: 'youtube' | 'gallery' | 'file' | null
+  /// For video type: 'gallery' | 'file' | null
   String? _videoSource;
 
   CourseModel? _selectedCourse;
@@ -53,7 +54,6 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
   void dispose() {
     _titleController.dispose();
     _descriptionController.dispose();
-    _linkController.dispose();
     super.dispose();
   }
 
@@ -95,16 +95,34 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
     }
   }
 
+  // ─── Helper to safely read file bytes (handles mobile path + memory) ───
+
+  Future<Uint8List?> _getFileBytes(PlatformFile pf) async {
+    if (pf.bytes != null && pf.bytes!.isNotEmpty) {
+      return pf.bytes;
+    }
+    if (pf.path != null && pf.path!.isNotEmpty) {
+      try {
+        final file = File(pf.path!);
+        if (await file.exists()) {
+          return await file.readAsBytes();
+        }
+      } catch (e) {
+        debugPrint('Error reading file bytes from path: $e');
+      }
+    }
+    return null;
+  }
+
   // ─── File Pickers ─────────────────────────────────────────────────────
 
   Future<void> _pickVideoFromGallery() async {
     try {
-      // FileType.video opens the device gallery for video files
       final result = await FilePicker.platform.pickFiles(
         type: FileType.video,
         withData: true,
       );
-      if (result != null) {
+      if (result != null && result.files.isNotEmpty) {
         setState(() {
           _selectedFile = result.files.first;
           _videoSource = 'gallery';
@@ -119,10 +137,10 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['mp4', 'mkv', 'mov', 'avi', 'webm', 'mpeg', '3gp'],
+        allowedExtensions: ['mp4', 'mkv', 'mov', 'avi', 'webm', 'mpeg', '3gp', 'flv'],
         withData: true,
       );
-      if (result != null) {
+      if (result != null && result.files.isNotEmpty) {
         setState(() {
           _selectedFile = result.files.first;
           _videoSource = 'file';
@@ -140,24 +158,24 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
         allowedExtensions: ['pdf'],
         withData: true,
       );
-      if (result != null) {
+      if (result != null && result.files.isNotEmpty) {
         setState(() {
           _selectedFile = result.files.first;
         });
       }
     } catch (e) {
-      _showError('Could not open file picker: ${e.toString()}');
+      _showError('Could not open PDF picker: ${e.toString()}');
     }
   }
 
-  Future<void> _pickDocFile() async {
+  Future<void> _pickDocOrImageFile() async {
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png'],
+        allowedExtensions: ['pdf', 'doc', 'docx', 'ppt', 'pptx', 'jpg', 'jpeg', 'png', 'webp', 'txt'],
         withData: true,
       );
-      if (result != null) {
+      if (result != null && result.files.isNotEmpty) {
         setState(() {
           _selectedFile = result.files.first;
         });
@@ -177,7 +195,7 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
     ));
   }
 
-  // ─── Video source chooser bottom sheet ───────────────────────────────
+  // ─── Video source chooser bottom sheet (Gallery & File Explorer/Drive) ───
 
   void _showVideoSourcePicker() {
     showModalBottomSheet(
@@ -201,7 +219,7 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Select where your video comes from',
+                  'Select video file from device or cloud storage',
                   style: theme.textTheme.bodyMedium,
                 ),
                 const SizedBox(height: 20),
@@ -209,41 +227,23 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
                   ctx,
                   icon: Icons.photo_library_rounded,
                   color: Colors.green,
-                  title: 'Gallery / Device Video',
-                  subtitle: 'Pick a video from your phone gallery',
+                  title: 'Device Gallery',
+                  subtitle: 'Pick recorded or stored video from gallery',
                   onTap: () {
                     Navigator.pop(ctx);
-                    // Reset YouTube link when switching to file
-                    _linkController.clear();
                     _pickVideoFromGallery();
                   },
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 12),
                 _buildVideoSourceTile(
                   ctx,
                   icon: Icons.folder_open_rounded,
                   color: Colors.orange,
                   title: 'File Explorer / Google Drive',
-                  subtitle: 'Browse files from storage or cloud',
+                  subtitle: 'Browse files from internal storage or cloud drive',
                   onTap: () {
                     Navigator.pop(ctx);
-                    _linkController.clear();
                     _pickVideoFromExplorer();
-                  },
-                ),
-                const SizedBox(height: 10),
-                _buildVideoSourceTile(
-                  ctx,
-                  icon: Icons.smart_display_rounded,
-                  color: Colors.redAccent,
-                  title: 'YouTube Link',
-                  subtitle: 'Paste a YouTube video URL',
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    setState(() {
-                      _selectedFile = null;
-                      _videoSource = 'youtube';
-                    });
                   },
                 ),
                 const SizedBox(height: 8),
@@ -315,62 +315,35 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
   void _handleUpload() async {
     if (!_formKey.currentState!.validate()) return;
 
-    // Validate based on type
-    if (_selectedType == 'video') {
-      if (_videoSource == null) {
-        _showError('Please choose a video source (Gallery, File Explorer, or YouTube).');
-        return;
-      }
-      if (_videoSource == 'youtube') {
-        final link = _linkController.text.trim();
-        if (link.isEmpty) {
-          _showError('Please enter a YouTube URL.');
-          return;
-        }
-        if (!link.contains('youtube.com') && !link.contains('youtu.be')) {
-          _showError('Please enter a valid YouTube URL.');
-          return;
-        }
+    final authService = Provider.of<AuthService>(context, listen: false);
+    final currentUser = authService.currentUser;
+
+    if (_selectedCourse == null) {
+      _showError('Please select a course.');
+      return;
+    }
+
+    if (_selectedFile == null) {
+      if (_selectedType == 'video') {
+        _showError('Please select a video file to upload.');
+      } else if (_selectedType == 'pdf') {
+        _showError('Please select a PDF file to upload.');
       } else {
-        // gallery or file
-        if (_selectedFile == null) {
-          _showError('Please select a video file.');
-          return;
-        }
-        if (_selectedFile!.bytes == null) {
-          _showError('Could not read the video file. Please try selecting it again.');
-          return;
-        }
+        _showError('Please select a document or image file to upload.');
       }
-    } else {
-      // notes, assignment, pdf — require a file
-      if (_selectedFile == null) {
-        _showError('Please select a file to upload.');
-        return;
-      }
-      if (_selectedFile!.bytes == null) {
-        _showError('Could not read file data. Please try selecting the file again.');
-        return;
-      }
+      return;
+    }
+
+    final fileBytes = await _getFileBytes(_selectedFile!);
+    if (fileBytes == null || fileBytes.isEmpty) {
+      _showError('Could not read the selected file data. Please try re-selecting it.');
+      return;
     }
 
     setState(() => _isUploading = true);
 
-    final authService = Provider.of<AuthService>(context, listen: false);
-    final currentUser = authService.currentUser;
-
     try {
-      // Determine the effective videoSource for the model
-      String? effectiveVideoSource;
-      String? videoLink;
-      if (_selectedType == 'video') {
-        if (_videoSource == 'youtube') {
-          effectiveVideoSource = 'youtube';
-          videoLink = _linkController.text.trim();
-        } else {
-          effectiveVideoSource = 'cloudinary';
-        }
-      }
+      final effectiveVideoSource = _selectedType == 'video' ? 'cloudinary' : null;
 
       final newMaterial = MaterialModel(
         id: '',
@@ -378,7 +351,7 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
         description: _descriptionController.text.trim(),
         type: _selectedType,
         fileUrl: null,
-        videoLink: videoLink,
+        videoLink: null,
         videoSource: effectiveVideoSource,
         courseId: _selectedCourse?.id ?? '',
         departmentId: _selectedCourse?.departmentId ?? '',
@@ -390,7 +363,7 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
 
       await _firestoreService.uploadMaterial(
         newMaterial,
-        fileBytes: _selectedFile?.bytes,
+        fileBytes: fileBytes,
         fileName: _selectedFile?.name,
         videoSource: effectiveVideoSource,
       );
@@ -518,7 +491,7 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
                 // Title Input
                 CustomTextField(
                   label: 'RESOURCE TITLE',
-                  hint: 'e.g. Midterm formula sheet, Assignment 1 solutions',
+                  hint: 'e.g. Lecture 5 Notes, Assignment 1 Solution, Chapter 3 Guide',
                   controller: _titleController,
                   validator: (val) {
                     if (val == null || val.isEmpty) {
@@ -575,7 +548,7 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          'VIDEO SOURCE',
+          'VIDEO FILE',
           style: theme.textTheme.bodyMedium?.copyWith(
             fontWeight: FontWeight.w600,
             color: theme.brightness == Brightness.dark
@@ -594,11 +567,11 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
               color: theme.cardColor,
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
-                color: _videoSource != null ? AppTheme.primaryColor : theme.dividerColor,
+                color: _selectedFile != null ? AppTheme.primaryColor : theme.dividerColor,
                 width: 1.5,
               ),
             ),
-            child: _videoSource == null
+            child: _selectedFile == null
                 ? Row(
                     children: [
                       Icon(Icons.video_call_rounded, color: theme.disabledColor, size: 28),
@@ -608,7 +581,7 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'Choose Video Source',
+                              'Choose Video File',
                               style: theme.textTheme.titleMedium?.copyWith(
                                 fontSize: 14,
                                 fontWeight: FontWeight.bold,
@@ -616,7 +589,7 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
                             ),
                             const SizedBox(height: 2),
                             Text(
-                              'Gallery, File Explorer, or YouTube Link',
+                              'From Gallery or File Explorer / Google Drive',
                               style: theme.textTheme.bodyMedium?.copyWith(fontSize: 12),
                             ),
                           ],
@@ -627,10 +600,8 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
                   )
                 : Row(
                     children: [
-                      Icon(
-                        _videoSource == 'youtube'
-                            ? Icons.smart_display_rounded
-                            : Icons.video_file_rounded,
+                      const Icon(
+                        Icons.video_file_rounded,
                         color: AppTheme.primaryColor,
                         size: 28,
                       ),
@@ -640,53 +611,32 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              _videoSource == 'youtube'
-                                  ? 'YouTube Link'
-                                  : (_selectedFile?.name ?? 'Video Selected'),
+                              _selectedFile?.name ?? 'Video Selected',
                               style: theme.textTheme.titleMedium?.copyWith(
                                 fontSize: 14,
                                 fontWeight: FontWeight.bold,
                                 color: AppTheme.primaryColor,
                               ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
-                            if (_selectedFile != null && _videoSource != 'youtube')
-                              Text(
-                                '${(_selectedFile!.size / 1024 / 1024).toStringAsFixed(2)} MB',
-                                style: theme.textTheme.bodyMedium?.copyWith(fontSize: 12),
-                              ),
+                            Text(
+                              '${(_selectedFile!.size / 1024 / 1024).toStringAsFixed(2)} MB • ${_videoSource == 'gallery' ? 'Gallery' : 'Drive / Storage'}',
+                              style: theme.textTheme.bodyMedium?.copyWith(fontSize: 12),
+                            ),
                           ],
                         ),
                       ),
                       IconButton(
                         icon: const Icon(Icons.swap_horiz_rounded),
                         color: AppTheme.primaryColor,
-                        tooltip: 'Change source',
+                        tooltip: 'Change video',
                         onPressed: _showVideoSourcePicker,
                       ),
                     ],
                   ),
           ),
         ),
-
-        // YouTube URL input — shown when source is youtube
-        if (_videoSource == 'youtube') ...[
-          const SizedBox(height: 16),
-          CustomTextField(
-            label: 'YOUTUBE URL',
-            hint: 'https://youtube.com/watch?v=... or https://youtu.be/...',
-            controller: _linkController,
-            prefixIcon: Icons.smart_display_rounded,
-            validator: (val) {
-              if (val == null || val.isEmpty) {
-                return 'Please enter a YouTube URL';
-              }
-              if (!val.contains('youtube.com') && !val.contains('youtu.be')) {
-                return 'Please enter a valid YouTube URL';
-              }
-              return null;
-            },
-          ),
-        ],
       ],
     );
   }
@@ -698,7 +648,7 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'PDF FILE',
+          'PDF DOCUMENT',
           style: theme.textTheme.bodyMedium?.copyWith(
             fontWeight: FontWeight.w600,
             color: theme.brightness == Brightness.dark
@@ -739,11 +689,13 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
                         ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 2),
                       Text(
                         _selectedFile == null
-                            ? 'Open file explorer or Google Drive'
+                            ? 'Browse PDF from device or Google Drive'
                             : '${(_selectedFile!.size / 1024 / 1024).toStringAsFixed(2)} MB',
                         style: theme.textTheme.bodyMedium?.copyWith(fontSize: 12),
                       ),
@@ -763,14 +715,31 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
     );
   }
 
-  // ─── Doc/Notes Picker Section ─────────────────────────────────────────
+  // ─── Doc/Image/Notes Picker Section ───────────────────────────────────
 
   Widget _buildDocPickerSection(ThemeData theme) {
+    IconData fileIcon = Icons.cloud_upload_outlined;
+    Color iconColor = theme.disabledColor;
+
+    if (_selectedFile != null) {
+      final ext = _selectedFile!.name.toLowerCase().split('.').last;
+      if (['jpg', 'jpeg', 'png', 'webp', 'gif'].contains(ext)) {
+        fileIcon = Icons.image_rounded;
+        iconColor = Colors.tealAccent;
+      } else if (ext == 'pdf') {
+        fileIcon = Icons.picture_as_pdf_rounded;
+        iconColor = Colors.redAccent;
+      } else {
+        fileIcon = Icons.insert_drive_file_rounded;
+        iconColor = AppTheme.primaryColor;
+      }
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'FILE ATTACHMENT',
+          _selectedType == 'assignment' ? 'ASSIGNMENT FILE (PDF / IMAGE / DOC)' : 'NOTES FILE (PDF / IMAGE / DOC)',
           style: theme.textTheme.bodyMedium?.copyWith(
             fontWeight: FontWeight.w600,
             color: theme.brightness == Brightness.dark
@@ -780,7 +749,7 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
         ),
         const SizedBox(height: 8),
         GestureDetector(
-          onTap: _pickDocFile,
+          onTap: _pickDocOrImageFile,
           child: Container(
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
@@ -794,10 +763,8 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
             child: Row(
               children: [
                 Icon(
-                  _selectedFile == null
-                      ? Icons.cloud_upload_outlined
-                      : Icons.insert_drive_file_outlined,
-                  color: _selectedFile == null ? theme.disabledColor : AppTheme.primaryColor,
+                  fileIcon,
+                  color: iconColor,
                   size: 28,
                 ),
                 const SizedBox(width: 16),
@@ -806,16 +773,18 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        _selectedFile == null ? 'Choose Document / PDF' : _selectedFile!.name,
+                        _selectedFile == null ? 'Choose Image, PDF or Document' : _selectedFile!.name,
                         style: theme.textTheme.titleMedium?.copyWith(
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
                         ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 2),
                       Text(
                         _selectedFile == null
-                            ? 'Accepts PDF, DOCX, Images up to 20MB'
+                            ? 'Accepts JPG, PNG, WEBP, PDF, DOCX'
                             : '${(_selectedFile!.size / 1024 / 1024).toStringAsFixed(2)} MB',
                         style: theme.textTheme.bodyMedium?.copyWith(fontSize: 12),
                       ),
@@ -846,10 +815,8 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
         onTap: () {
           setState(() {
             _selectedType = type;
-            // Reset file and video source when switching type
             _selectedFile = null;
             _videoSource = null;
-            _linkController.clear();
           });
         },
         child: Container(
