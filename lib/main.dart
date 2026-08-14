@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:edushare/core/theme.dart';
 import 'package:edushare/core/providers/theme_provider.dart';
+import 'package:edushare/core/providers/user_stats_provider.dart';
 import 'package:edushare/core/services/auth_service.dart';
 import 'package:edushare/core/services/notification_service.dart';
 import 'package:edushare/views/auth/login_screen.dart';
@@ -23,9 +24,12 @@ void main() async {
 
   // Pre-create notification service so it's available immediately after login
   final notificationService = NotificationService();
+  final userStatsProvider = UserStatsProvider();
   if (authService.currentUser != null) {
     // Refresh badge count on app startup if a session was restored
     notificationService.refreshUnreadCount();
+    // Refresh learning stats for the restored session user
+    userStatsProvider.refresh();
   }
 
   runApp(
@@ -34,6 +38,8 @@ void main() async {
         ChangeNotifierProvider<AuthService>.value(value: authService),
         ChangeNotifierProvider<NotificationService>.value(
             value: notificationService),
+        ChangeNotifierProvider<UserStatsProvider>.value(
+            value: userStatsProvider),
         ChangeNotifierProvider(
           create: (_) => ThemeProvider(initialIsDark: initialIsDark),
         ),

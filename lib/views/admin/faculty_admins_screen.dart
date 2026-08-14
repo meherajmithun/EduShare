@@ -2,14 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:edushare/core/theme.dart';
 import 'package:edushare/core/services/firestore_service.dart';
 import 'package:edushare/models/user_model.dart';
-import 'package:edushare/core/role_helper.dart';
-import 'package:edushare/widgets/glass_card.dart';
-import 'package:edushare/widgets/notification_bell.dart';
-import 'package:edushare/widgets/app_bar_profile_avatar.dart';
 
-/// Super Admin screen to manage Admin registrations.
-/// Tab 0: Pending (approve / reject with reason)
-/// Tab 1: All Admins (disable / enable / delete)
+// ─── Colour tokens ────────────────────────────────────────────────────────────
+const _kAmber = Color(0xFFF59E0B);
+const _kGreen = Color(0xFF10B981);
+const _kRed = Color(0xFFEF4444);
+
+/// Super Admin screen — Manage Admin accounts only.
+/// Role displayed: always "Admin" (never "Faculty Admin").
+/// Tabs: Pending (approve / reject) | All Admins (search, filter, suspend, delete)
 class FacultyAdminsScreen extends StatefulWidget {
   const FacultyAdminsScreen({Key? key}) : super(key: key);
 
@@ -21,17 +22,26 @@ class _FacultyAdminsScreenState extends State<FacultyAdminsScreen>
     with SingleTickerProviderStateMixin {
   final _service = FirestoreService();
   late TabController _tabController;
+  final _searchController = TextEditingController();
 
   List<UserModel> _pending = [];
   List<UserModel> _all = [];
+  List<UserModel> _filtered = [];
   bool _loadingPending = true;
   bool _loadingAll = true;
+  String _filterStatus = 'all'; // all | pending | active | disabled
+  UserModel? _selectedAdmin;
   final Set<String> _processingIds = {};
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    _tabController.addListener(() {
+      if (!_tabController.indexIsChanging) {
+        setState(() => _selectedAdmin = null);
+      }
+    });
     _loadPending();
     _loadAll();
   }
@@ -39,8 +49,11 @@ class _FacultyAdminsScreenState extends State<FacultyAdminsScreen>
   @override
   void dispose() {
     _tabController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
+
+  // ── Data loading ───────────────────────────────────────────────────────────
 
   Future<void> _loadPending() async {
     try {
@@ -54,11 +67,33 @@ class _FacultyAdminsScreenState extends State<FacultyAdminsScreen>
   Future<void> _loadAll() async {
     try {
       final list = await _service.getAllFacultyAdmins();
-      if (mounted) setState(() { _all = list; _loadingAll = false; });
+      if (mounted) {
+        setState(() {
+          _all = list;
+          _loadingAll = false;
+          _applyFilter();
+        });
+      }
     } catch (_) {
       if (mounted) setState(() => _loadingAll = false);
     }
   }
+
+  void _applyFilter() {
+    final query = _searchController.text.trim().toLowerCase();
+    setState(() {
+      _filtered = _all.where((u) {
+        final matchStatus = _filterStatus == 'all' || u.status == _filterStatus;
+        final matchSearch = query.isEmpty ||
+            u.name.toLowerCase().contains(query) ||
+            u.email.toLowerCase().contains(query) ||
+            (u.department.toLowerCase().contains(query));
+        return matchStatus && matchSearch;
+      }).toList();
+    });
+  }
+
+  // ── Actions ────────────────────────────────────────────────────────────────
 
   Future<void> _approve(UserModel admin) async {
     setState(() => _processingIds.add(admin.uid));
@@ -67,20 +102,19 @@ class _FacultyAdminsScreenState extends State<FacultyAdminsScreen>
       setState(() {
         _pending.removeWhere((u) => u.uid == admin.uid);
         _processingIds.remove(admin.uid);
+        if (_selectedAdmin?.uid == admin.uid) _selectedAdmin = null;
       });
       await _loadAll();
-      _showSnack('${admin.name} approved and can now log in.', Colors.green.shade600);
+      _showSnack('${admin.name} approved.', _kGreen);
     } catch (e) {
       setState(() => _processingIds.remove(admin.uid));
-      _showSnack('Failed to approve: $e', const Color(0xFFEF4444));
+      _showSnack('Failed: $e', _kRed);
     }
   }
 
   Future<void> _reject(UserModel admin) async {
-    // Collect rejection reason via dialog
-    final reason = await _rejectReasonDialog(admin.name);
-    if (reason == null) return; // user cancelled
-
+    final reason = await _showRejectDialog(admin.name);
+    if (reason == null) return;
     setState(() => _processingIds.add(admin.uid));
     try {
       await _service.rejectFacultyAdmin(admin.uid,
@@ -88,148 +122,147 @@ class _FacultyAdminsScreenState extends State<FacultyAdminsScreen>
       setState(() {
         _pending.removeWhere((u) => u.uid == admin.uid);
         _processingIds.remove(admin.uid);
+        if (_selectedAdmin?.uid == admin.uid) _selectedAdmin = null;
       });
-      _showSnack('${admin.name}\'s registration has been rejected.', const Color(0xFFEF4444));
+      _showSnack('${admin.name} rejected.', _kRed);
     } catch (e) {
       setState(() => _processingIds.remove(admin.uid));
-      _showSnack('Failed to reject: $e', const Color(0xFFEF4444));
+      _showSnack('Failed: $e', _kRed);
     }
   }
 
-  Future<void> _disable(UserModel admin) async {
-    final confirmed = await _confirmDialog(
-      'Disable Account',
-      'Disable ${admin.name}\'s Admin account? They will not be able to log in.',
-      confirmLabel: 'Disable',
-      confirmColor: const Color(0xFFF59E0B),
+  Future<void> _suspend(UserModel admin) async {
+    final ok = await _confirmDialog(
+      'Suspend Admin',
+      'Suspend ${admin.name}\'s account? They cannot log in while suspended.',
+      label: 'Suspend',
+      color: _kAmber,
     );
-    if (!confirmed) return;
-
+    if (!ok) return;
     setState(() => _processingIds.add(admin.uid));
     try {
       await _service.disableFacultyAdmin(admin.uid);
       await _loadAll();
-      setState(() => _processingIds.remove(admin.uid));
-      _showSnack('${admin.name}\'s account has been disabled.', const Color(0xFFF59E0B));
+      setState(() {
+        _processingIds.remove(admin.uid);
+        _selectedAdmin = null;
+      });
+      _showSnack('${admin.name} suspended.', _kAmber);
     } catch (e) {
       setState(() => _processingIds.remove(admin.uid));
-      _showSnack('Failed to disable: $e', const Color(0xFFEF4444));
+      _showSnack('Failed: $e', _kRed);
     }
   }
 
-  Future<void> _enable(UserModel admin) async {
+  Future<void> _activate(UserModel admin) async {
     setState(() => _processingIds.add(admin.uid));
     try {
       await _service.enableFacultyAdmin(admin.uid);
       await _loadAll();
-      setState(() => _processingIds.remove(admin.uid));
-      _showSnack('${admin.name}\'s account has been re-enabled.', Colors.green.shade600);
+      setState(() {
+        _processingIds.remove(admin.uid);
+        _selectedAdmin = null;
+      });
+      _showSnack('${admin.name} reactivated.', _kGreen);
     } catch (e) {
       setState(() => _processingIds.remove(admin.uid));
-      _showSnack('Failed to enable: $e', const Color(0xFFEF4444));
+      _showSnack('Failed: $e', _kRed);
     }
   }
 
   Future<void> _delete(UserModel admin) async {
-    final confirmed = await _confirmDialog(
+    final ok = await _confirmDialog(
       'Delete Account',
       'Permanently delete ${admin.name}\'s Admin account? This cannot be undone.',
-      confirmLabel: 'Delete',
-      confirmColor: const Color(0xFFEF4444),
+      label: 'Delete',
+      color: _kRed,
     );
-    if (!confirmed) return;
-
+    if (!ok) return;
     setState(() => _processingIds.add(admin.uid));
     try {
       await _service.deleteFacultyAdmin(admin.uid);
       setState(() {
         _all.removeWhere((u) => u.uid == admin.uid);
         _processingIds.remove(admin.uid);
+        if (_selectedAdmin?.uid == admin.uid) _selectedAdmin = null;
+        _applyFilter();
       });
-      _showSnack('${admin.name}\'s account has been permanently deleted.', const Color(0xFFEF4444));
+      _showSnack('${admin.name} deleted.', _kRed);
     } catch (e) {
       setState(() => _processingIds.remove(admin.uid));
-      _showSnack('Failed to delete: $e', const Color(0xFFEF4444));
+      _showSnack('Failed: $e', _kRed);
     }
   }
 
-  Future<bool> _confirmDialog(
-    String title,
-    String message, {
-    required String confirmLabel,
-    required Color confirmColor,
-  }) async {
+  // ── Dialogs ────────────────────────────────────────────────────────────────
+
+  Future<String?> _showRejectDialog(String name) async {
+    final ctrl = TextEditingController();
+    final result = await showDialog<String?>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Reject Registration',
+            style: TextStyle(fontWeight: FontWeight.bold)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Rejecting $name\'s Admin application.'),
+            const SizedBox(height: 14),
+            TextField(
+              controller: ctrl,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                labelText: 'Reason (optional)',
+                hintText: 'e.g. Incomplete information',
+                border: OutlineInputBorder(),
+                alignLabelWithHint: true,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, null),
+              child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: _kRed),
+            onPressed: () => Navigator.pop(ctx, ctrl.text),
+            child: const Text('Reject',
+                style:
+                    TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    return result;
+  }
+
+  Future<bool> _confirmDialog(String title, String msg,
+      {required String label, required Color color}) async {
     return await showDialog<bool>(
           context: context,
           builder: (_) => AlertDialog(
-            title: Text(title,
-                style: const TextStyle(fontWeight: FontWeight.bold)),
-            content: Text(message),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+            content: Text(msg),
             actions: [
               TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('Cancel'),
-              ),
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Cancel')),
               ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: confirmColor),
+                style: ElevatedButton.styleFrom(backgroundColor: color),
                 onPressed: () => Navigator.pop(context, true),
-                child: Text(confirmLabel,
+                child: Text(label,
                     style: const TextStyle(color: Colors.white)),
               ),
             ],
           ),
         ) ??
         false;
-  }
-
-  /// Shows a dialog asking for a rejection reason.
-  /// Returns the entered string (possibly empty) if user taps Reject,
-  /// or null if user cancelled.
-  Future<String?> _rejectReasonDialog(String adminName) async {
-    final reasonController = TextEditingController();
-    final result = await showDialog<String?>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text('Reject Registration',
-              style: TextStyle(fontWeight: FontWeight.bold)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('You are rejecting $adminName\'s Admin application.'),
-              const SizedBox(height: 14),
-              TextField(
-                controller: reasonController,
-                maxLines: 3,
-                decoration: const InputDecoration(
-                  labelText: 'Reason (optional)',
-                  hintText: 'e.g. Incomplete information provided',
-                  border: OutlineInputBorder(),
-                  alignLabelWithHint: true,
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, null),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFEF4444)),
-              onPressed: () => Navigator.pop(ctx, reasonController.text),
-              child: const Text('Reject',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-            ),
-          ],
-        );
-      },
-    );
-    reasonController.dispose();
-    return result;
   }
 
   void _showSnack(String msg, Color color) {
@@ -242,84 +275,242 @@ class _FacultyAdminsScreenState extends State<FacultyAdminsScreen>
     ));
   }
 
+  // ── Build ──────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
 
     return Scaffold(
-      appBar: AppBar(
-        leadingWidth: 180,
-        leading: const AppBarProfileAvatar(),
-        actions: const [NotificationBell()],
-        bottom: TabBar(
-          controller: _tabController,
-          labelColor: AppTheme.primaryColor,
-          indicatorColor: AppTheme.primaryColor,
-          unselectedLabelColor: theme.disabledColor,
-          tabs: [
-            Tab(
+      backgroundColor: theme.scaffoldBackgroundColor,
+      body: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── AppBar ──────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(Icons.hourglass_top_rounded, size: 16),
-                  const SizedBox(width: 6),
-                  Text('Pending (${_pending.length})'),
+                  // Back button
+                  GestureDetector(
+                    onTap: () =>
+                        Navigator.of(context).canPop() ? Navigator.of(context).pop() : null,
+                    child: Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: isDark ? AppTheme.darkCard : AppTheme.lightCard,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                            color: isDark
+                                ? AppTheme.darkBorder
+                                : AppTheme.lightBorder),
+                      ),
+                      child: Icon(Icons.chevron_left_rounded,
+                          color: isDark
+                              ? AppTheme.darkTextPrimary
+                              : AppTheme.lightTextPrimary),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('ADMIN CONSOLE',
+                            style: TextStyle(
+                                fontSize: 10,
+                                letterSpacing: 1.2,
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.primaryColor)),
+                        Text('Manage Admins',
+                            style: theme.textTheme.titleLarge?.copyWith(
+                                fontWeight: FontWeight.bold, fontSize: 20)),
+                      ],
+                    ),
+                  ),
+                  // Invite (add) button
+                  GestureDetector(
+                    onTap: () => _showSnack(
+                        'Send invite link to a new Admin via email (coming soon)',
+                        AppTheme.primaryColor),
+                    child: Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: AppTheme.primaryColor,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(Icons.add_rounded,
+                          color: Colors.white, size: 22),
+                    ),
+                  ),
                 ],
               ),
             ),
-            Tab(
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+
+            const SizedBox(height: 14),
+
+            // ── Search Bar ──────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: isDark ? AppTheme.darkCard : AppTheme.lightCard,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                      color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder),
+                ),
+                child: TextField(
+                  controller: _searchController,
+                  onChanged: (_) => _applyFilter(),
+                  style: theme.textTheme.bodyMedium?.copyWith(fontSize: 14),
+                  decoration: InputDecoration(
+                    hintText: 'Search name, email, or department...',
+                    hintStyle: theme.textTheme.bodyMedium?.copyWith(fontSize: 13),
+                    prefixIcon: Icon(Icons.search_rounded,
+                        color: isDark
+                            ? AppTheme.darkTextSecondary
+                            : AppTheme.lightTextSecondary,
+                        size: 20),
+                    suffixIcon: _searchController.text.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear_rounded, size: 18),
+                            onPressed: () {
+                              _searchController.clear();
+                              _applyFilter();
+                            })
+                        : null,
+                    border: InputBorder.none,
+                    contentPadding:
+                        const EdgeInsets.symmetric(vertical: 13, horizontal: 4),
+                  ),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 12),
+
+            // ── Tabs ────────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: isDark ? AppTheme.darkCard : AppTheme.lightCard,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                      color:
+                          isDark ? AppTheme.darkBorder : AppTheme.lightBorder),
+                ),
+                child: TabBar(
+                  controller: _tabController,
+                  labelColor: Colors.white,
+                  unselectedLabelColor: isDark
+                      ? AppTheme.darkTextSecondary
+                      : AppTheme.lightTextSecondary,
+                  indicator: BoxDecoration(
+                    color: AppTheme.primaryColor,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  indicatorSize: TabBarIndicatorSize.tab,
+                  dividerColor: Colors.transparent,
+                  tabs: [
+                    Tab(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.hourglass_top_rounded, size: 14),
+                          const SizedBox(width: 6),
+                          Text('Pending (${_pending.length})'),
+                        ],
+                      ),
+                    ),
+                    Tab(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.people_rounded, size: 14),
+                          const SizedBox(width: 6),
+                          Text('All (${_all.length})'),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 4),
+
+            // ── Tab Body ────────────────────────────────────────────
+            Expanded(
+              child: TabBarView(
+                controller: _tabController,
                 children: [
-                  const Icon(Icons.people_rounded, size: 16),
-                  const SizedBox(width: 6),
-                  Text('All (${_all.length})'),
+                  // PENDING TAB
+                  _PendingTab(
+                    pending: _pending,
+                    isLoading: _loadingPending,
+                    processingIds: _processingIds,
+                    selectedAdmin: _selectedAdmin,
+                    isDark: isDark,
+                    onSelect: (u) => setState(() => _selectedAdmin = u),
+                    onApprove: _approve,
+                    onReject: _reject,
+                    onRefresh: _loadPending,
+                  ),
+                  // ALL ADMINS TAB
+                  _AllTab(
+                    admins: _filtered,
+                    isLoading: _loadingAll,
+                    processingIds: _processingIds,
+                    selectedAdmin: _selectedAdmin,
+                    isDark: isDark,
+                    filterStatus: _filterStatus,
+                    onFilterChanged: (s) {
+                      setState(() => _filterStatus = s);
+                      _applyFilter();
+                    },
+                    onSelect: (u) => setState(() => _selectedAdmin = u),
+                    onSuspend: _suspend,
+                    onActivate: _activate,
+                    onDelete: _delete,
+                    onRefresh: _loadAll,
+                  ),
                 ],
               ),
             ),
           ],
         ),
       ),
-      body: TabBarView(
-        controller: _tabController,
-        children: [
-          _PendingTab(
-            pending: _pending,
-            isLoading: _loadingPending,
-            processingIds: _processingIds,
-            onApprove: _approve,
-            onReject: _reject,
-            onRefresh: _loadPending,
-          ),
-          _AllTab(
-            admins: _all,
-            isLoading: _loadingAll,
-            processingIds: _processingIds,
-            onDisable: _disable,
-            onEnable: _enable,
-            onDelete: _delete,
-            onRefresh: _loadAll,
-          ),
-        ],
-      ),
     );
   }
 }
 
-// ─── Pending Tab ──────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// Pending Tab
+// ═══════════════════════════════════════════════════════════════════════════════
 
 class _PendingTab extends StatelessWidget {
   final List<UserModel> pending;
   final bool isLoading;
   final Set<String> processingIds;
-  final void Function(UserModel) onApprove;
-  final void Function(UserModel) onReject;
+  final UserModel? selectedAdmin;
+  final bool isDark;
+  final ValueChanged<UserModel?> onSelect;
+  final Future<void> Function(UserModel) onApprove;
+  final Future<void> Function(UserModel) onReject;
   final Future<void> Function() onRefresh;
 
   const _PendingTab({
     required this.pending,
     required this.isLoading,
     required this.processingIds,
+    required this.selectedAdmin,
+    required this.isDark,
+    required this.onSelect,
     required this.onApprove,
     required this.onReject,
     required this.onRefresh,
@@ -332,106 +523,124 @@ class _PendingTab extends StatelessWidget {
           child: CircularProgressIndicator(color: AppTheme.primaryColor));
     }
 
-    if (pending.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.task_alt_rounded,
-                size: 60, color: Color(0xFF10B981)),
-            const SizedBox(height: 14),
-            Text('All caught up!',
-                style: Theme.of(context)
-                    .textTheme
-                    .titleMedium
-                    ?.copyWith(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 6),
-            Text('No pending Admin registrations.',
-                style: Theme.of(context).textTheme.bodyMedium),
-          ],
-        ),
-      );
-    }
-
     return RefreshIndicator(
       color: AppTheme.primaryColor,
       onRefresh: onRefresh,
-      child: ListView.builder(
+      child: CustomScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-        itemCount: pending.length,
-        itemBuilder: (context, index) {
-          final admin = pending[index];
-          final isProcessing = processingIds.contains(admin.uid);
-          return Container(
-            margin: const EdgeInsets.only(bottom: 14),
-            child: _FacultyAdminCard(
-              admin: admin,
-              isProcessing: isProcessing,
-              actions: isProcessing
-                  ? null
-                  : Row(
+        slivers: [
+          // Detail card (if selected)
+          if (selectedAdmin != null && pending.any((u) => u.uid == selectedAdmin!.uid))
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                child: _AdminDetailCard(
+                  admin: selectedAdmin!,
+                  isDark: isDark,
+                  isProcessing: processingIds.contains(selectedAdmin!.uid),
+                  onApprove: () => onApprove(selectedAdmin!),
+                  onReject: () => onReject(selectedAdmin!),
+                  onClose: () => onSelect(null),
+                ),
+              ),
+            ),
+
+          if (pending.isEmpty)
+            SliverFillRemaining(
+              child: _EmptyState(
+                icon: Icons.hourglass_disabled_rounded,
+                title: 'No Pending Admins',
+                subtitle: 'All admin registrations have been reviewed.',
+                isDark: isDark,
+              ),
+            )
+          else ...[
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+                child: Text('PENDING REGISTRATIONS',
+                    style: TextStyle(
+                        fontSize: 11,
+                        letterSpacing: 0.8,
+                        fontWeight: FontWeight.w600,
+                        color: isDark
+                            ? AppTheme.darkTextSecondary
+                            : AppTheme.lightTextSecondary)),
+              ),
+            ),
+            SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (ctx, i) => Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                  child: _AdminListTile(
+                    admin: pending[i],
+                    isDark: isDark,
+                    isSelected: selectedAdmin?.uid == pending[i].uid,
+                    isProcessing: processingIds.contains(pending[i].uid),
+                    onTap: () => onSelect(
+                        selectedAdmin?.uid == pending[i].uid ? null : pending[i]),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: const Color(0xFFEF4444),
-                              side: const BorderSide(color: Color(0xFFEF4444)),
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(10)),
-                              padding: const EdgeInsets.symmetric(vertical: 10),
-                            ),
-                            icon: const Icon(Icons.close_rounded, size: 16),
-                            label: const Text('Reject',
-                                style: TextStyle(
-                                    fontWeight: FontWeight.bold, fontSize: 13)),
-                            onPressed: () => onReject(admin),
-                          ),
+                        _ActionButton(
+                          label: 'Approve',
+                          color: _kGreen,
+                          isDark: isDark,
+                          onTap: () => onApprove(pending[i]),
+                          isLoading: processingIds.contains(pending[i].uid),
                         ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF10B981),
-                              foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(10)),
-                              padding: const EdgeInsets.symmetric(vertical: 10),
-                            ),
-                            icon: const Icon(Icons.check_rounded, size: 16),
-                            label: const Text('Approve',
-                                style: TextStyle(
-                                    fontWeight: FontWeight.bold, fontSize: 13)),
-                            onPressed: () => onApprove(admin),
-                          ),
+                        const SizedBox(width: 8),
+                        _ActionButton(
+                          label: 'Reject',
+                          color: _kRed,
+                          isDark: isDark,
+                          onTap: () => onReject(pending[i]),
+                          isLoading: processingIds.contains(pending[i].uid),
                         ),
                       ],
                     ),
+                  ),
+                ),
+                childCount: pending.length,
+              ),
             ),
-          );
-        },
+          ],
+          const SliverToBoxAdapter(child: SizedBox(height: 16)),
+        ],
       ),
     );
   }
 }
 
-// ─── All Tab ──────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// All Admins Tab
+// ═══════════════════════════════════════════════════════════════════════════════
 
 class _AllTab extends StatelessWidget {
   final List<UserModel> admins;
   final bool isLoading;
   final Set<String> processingIds;
-  final void Function(UserModel) onDisable;
-  final void Function(UserModel) onEnable;
-  final void Function(UserModel) onDelete;
+  final UserModel? selectedAdmin;
+  final bool isDark;
+  final String filterStatus;
+  final ValueChanged<String> onFilterChanged;
+  final ValueChanged<UserModel?> onSelect;
+  final Future<void> Function(UserModel) onSuspend;
+  final Future<void> Function(UserModel) onActivate;
+  final Future<void> Function(UserModel) onDelete;
   final Future<void> Function() onRefresh;
 
   const _AllTab({
     required this.admins,
     required this.isLoading,
     required this.processingIds,
-    required this.onDisable,
-    required this.onEnable,
+    required this.selectedAdmin,
+    required this.isDark,
+    required this.filterStatus,
+    required this.onFilterChanged,
+    required this.onSelect,
+    required this.onSuspend,
+    required this.onActivate,
     required this.onDelete,
     required this.onRefresh,
   });
@@ -443,137 +652,183 @@ class _AllTab extends StatelessWidget {
           child: CircularProgressIndicator(color: AppTheme.primaryColor));
     }
 
-    if (admins.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.people_outline_rounded,
-                size: 60, color: AppTheme.primaryColor),
-            const SizedBox(height: 14),
-            Text('No Admins yet.',
-                style: Theme.of(context)
-                    .textTheme
-                    .titleMedium
-                    ?.copyWith(fontWeight: FontWeight.bold)),
-          ],
-        ),
-      );
-    }
-
     return RefreshIndicator(
       color: AppTheme.primaryColor,
       onRefresh: onRefresh,
-      child: ListView.builder(
+      child: CustomScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-        itemCount: admins.length,
-        itemBuilder: (context, index) {
-          final admin = admins[index];
-          final isProcessing = processingIds.contains(admin.uid);
-          final isDisabled = admin.isDisabled;
-          final isPending = admin.isPending;
+        slivers: [
+          // ── Status filter chips ────────────────────────────────
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    for (final f in [
+                      {'value': 'all', 'label': 'All'},
+                      {'value': 'pending', 'label': 'Pending'},
+                      {'value': 'active', 'label': 'Active'},
+                      {'value': 'disabled', 'label': 'Disabled'},
+                    ]) ...[
+                      _FilterChip(
+                        label: f['label']!,
+                        isSelected: filterStatus == f['value'],
+                        isDark: isDark,
+                        onTap: () => onFilterChanged(f['value']!),
+                      ),
+                      const SizedBox(width: 8),
+                    ]
+                  ],
+                ),
+              ),
+            ),
+          ),
 
-          return Container(
-            margin: const EdgeInsets.only(bottom: 14),
-            child: _FacultyAdminCard(
-              admin: admin,
-              isProcessing: isProcessing,
-              actions: isProcessing
-                  ? null
-                  : Row(
+          // ── Selected Admin detail card ─────────────────────────
+          if (selectedAdmin != null &&
+              admins.any((u) => u.uid == selectedAdmin!.uid))
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                child: _AdminDetailCard(
+                  admin: selectedAdmin!,
+                  isDark: isDark,
+                  isProcessing: processingIds.contains(selectedAdmin!.uid),
+                  onApprove: selectedAdmin!.status == 'disabled'
+                      ? () => onActivate(selectedAdmin!)
+                      : null,
+                  onSuspend: selectedAdmin!.status == 'active'
+                      ? () => onSuspend(selectedAdmin!)
+                      : null,
+                  onDelete: () => onDelete(selectedAdmin!),
+                  onClose: () => onSelect(null),
+                ),
+              ),
+            ),
+
+          // ── Directory label ────────────────────────────────────
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+              child: Text('DIRECTORY LIST',
+                  style: TextStyle(
+                      fontSize: 11,
+                      letterSpacing: 0.8,
+                      fontWeight: FontWeight.w600,
+                      color: isDark
+                          ? AppTheme.darkTextSecondary
+                          : AppTheme.lightTextSecondary)),
+            ),
+          ),
+
+          if (admins.isEmpty)
+            SliverFillRemaining(
+              child: _EmptyState(
+                icon: Icons.people_outline_rounded,
+                title: 'No Admins Found',
+                subtitle: 'Try adjusting the filter or search.',
+                isDark: isDark,
+              ),
+            )
+          else
+            SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (ctx, i) {
+                  final admin = admins[i];
+                  Widget trailing;
+                  if (admin.status == 'pending') {
+                    trailing = Row(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        if (!isPending)
-                          Expanded(
-                            child: isDisabled
-                                ? OutlinedButton.icon(
-                                    style: OutlinedButton.styleFrom(
-                                      foregroundColor: const Color(0xFF10B981),
-                                      side: const BorderSide(
-                                          color: Color(0xFF10B981)),
-                                      shape: RoundedRectangleBorder(
-                                          borderRadius:
-                                              BorderRadius.circular(10)),
-                                      padding: const EdgeInsets.symmetric(
-                                          vertical: 10),
-                                    ),
-                                    icon: const Icon(
-                                        Icons.check_circle_outline_rounded,
-                                        size: 16),
-                                    label: const Text('Enable',
-                                        style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 13)),
-                                    onPressed: () => onEnable(admin),
-                                  )
-                                : OutlinedButton.icon(
-                                    style: OutlinedButton.styleFrom(
-                                      foregroundColor: const Color(0xFFF59E0B),
-                                      side: const BorderSide(
-                                          color: Color(0xFFF59E0B)),
-                                      shape: RoundedRectangleBorder(
-                                          borderRadius:
-                                              BorderRadius.circular(10)),
-                                      padding: const EdgeInsets.symmetric(
-                                          vertical: 10),
-                                    ),
-                                    icon: const Icon(
-                                        Icons.block_rounded,
-                                        size: 16),
-                                    label: const Text('Disable',
-                                        style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 13)),
-                                    onPressed: () => onDisable(admin),
-                                  ),
-                          ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: const Color(0xFFEF4444),
-                              side: const BorderSide(color: Color(0xFFEF4444)),
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(10)),
-                              padding: const EdgeInsets.symmetric(vertical: 10),
-                            ),
-                            icon: const Icon(Icons.delete_outline_rounded,
-                                size: 16),
-                            label: const Text('Delete',
-                                style: TextStyle(
-                                    fontWeight: FontWeight.bold, fontSize: 13)),
-                            onPressed: () => onDelete(admin),
-                          ),
+                        _ActionButton(
+                          label: 'Approve',
+                          color: _kGreen,
+                          isDark: isDark,
+                          onTap: () => onActivate(admin),
+                          isLoading: processingIds.contains(admin.uid),
+                        ),
+                        const SizedBox(width: 8),
+                        _ActionButton(
+                          label: 'Delete',
+                          color: _kRed,
+                          isDark: isDark,
+                          onTap: () => onDelete(admin),
+                          isLoading: processingIds.contains(admin.uid),
                         ),
                       ],
+                    );
+                  } else if (admin.status == 'active') {
+                    trailing = _ActionButton(
+                      label: 'Suspend',
+                      color: _kAmber,
+                      isDark: isDark,
+                      onTap: () => onSuspend(admin),
+                      isLoading: processingIds.contains(admin.uid),
+                    );
+                  } else {
+                    trailing = _ActionButton(
+                      label: 'Activate',
+                      color: _kGreen,
+                      isDark: isDark,
+                      onTap: () => onActivate(admin),
+                      isLoading: processingIds.contains(admin.uid),
+                    );
+                  }
+
+                  return Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                    child: _AdminListTile(
+                      admin: admin,
+                      isDark: isDark,
+                      isSelected: selectedAdmin?.uid == admin.uid,
+                      isProcessing: processingIds.contains(admin.uid),
+                      onTap: () => onSelect(
+                          selectedAdmin?.uid == admin.uid ? null : admin),
+                      trailing: trailing,
                     ),
+                  );
+                },
+                childCount: admins.length,
+              ),
             ),
-          );
-        },
+          const SliverToBoxAdapter(child: SizedBox(height: 16)),
+        ],
       ),
     );
   }
 }
 
-// ─── Reusable Faculty Admin Card ──────────────────────────────────────────
+// ─── Admin Detail Card (Figma top card when selected) ─────────────────────────
 
-class _FacultyAdminCard extends StatelessWidget {
+class _AdminDetailCard extends StatelessWidget {
   final UserModel admin;
+  final bool isDark;
   final bool isProcessing;
-  final Widget? actions;
+  final VoidCallback? onApprove;
+  final VoidCallback? onSuspend;
+  final VoidCallback? onReject;
+  final VoidCallback? onDelete;
+  final VoidCallback onClose;
 
-  const _FacultyAdminCard({
+  const _AdminDetailCard({
     required this.admin,
+    required this.isDark,
     required this.isProcessing,
-    this.actions,
+    this.onApprove,
+    this.onSuspend,
+    this.onReject,
+    this.onDelete,
+    required this.onClose,
   });
 
-  Color _statusColor() {
+  Color get _statusColor {
     switch (admin.status) {
-      case 'active': return const Color(0xFF10B981);
-      case 'pending': return const Color(0xFFF59E0B);
-      case 'disabled': return const Color(0xFFEF4444);
-      default: return Colors.grey;
+      case 'active': return _kGreen;
+      case 'pending': return _kAmber;
+      case 'disabled': return _kRed;
+      default: return AppTheme.darkTextSecondary;
     }
   }
 
@@ -581,11 +836,16 @@ class _FacultyAdminCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final initials = admin.name.isNotEmpty
-        ? admin.name.trim().split(' ').map((w) => w[0]).take(2).join().toUpperCase()
-        : '?';
-    final statusColor = _statusColor();
+        ? admin.name.trim().split(' ').map((w) => w.isNotEmpty ? w[0] : '').take(2).join().toUpperCase()
+        : 'A';
+    final photoUrl = admin.profilePhotoUrl;
 
-    return GlassCard(
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? AppTheme.darkCard : AppTheme.lightCard,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.primaryColor.withValues(alpha: 0.5)),
+      ),
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -593,20 +853,33 @@ class _FacultyAdminCard extends StatelessWidget {
           Row(
             children: [
               // Avatar
-              CircleAvatar(
-                radius: 22,
-                backgroundColor: AppTheme.primaryColor.withOpacity(0.15),
-                backgroundImage: (admin.profilePhotoUrl != null &&
-                        admin.profilePhotoUrl!.isNotEmpty)
-                    ? NetworkImage(admin.profilePhotoUrl!)
-                    : null,
-                child: (admin.profilePhotoUrl == null ||
-                        admin.profilePhotoUrl!.isEmpty)
-                    ? Text(initials,
-                        style: const TextStyle(
-                            color: AppTheme.primaryColor,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14))
+              Container(
+                width: 52,
+                height: 52,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: photoUrl == null || photoUrl.isEmpty
+                      ? const LinearGradient(
+                          colors: [AppTheme.primaryColor, AppTheme.accentColor],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight)
+                      : null,
+                  image: photoUrl != null && photoUrl.isNotEmpty
+                      ? DecorationImage(
+                          image: NetworkImage(photoUrl),
+                          fit: BoxFit.cover,
+                          onError: (_, __) {})
+                      : null,
+                  border: Border.all(
+                      color: AppTheme.primaryColor.withValues(alpha: 0.5), width: 2),
+                ),
+                child: photoUrl == null || photoUrl.isEmpty
+                    ? Center(
+                        child: Text(initials,
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold)))
                     : null,
               ),
               const SizedBox(width: 12),
@@ -614,72 +887,441 @@ class _FacultyAdminCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(admin.name,
-                        style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.bold, fontSize: 14)),
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(admin.name,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.bold)),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppTheme.primaryColor.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Text('ADMIN',
+                              style: TextStyle(
+                                  color: AppTheme.primaryColor,
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.bold)),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: _statusColor.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                              admin.status[0].toUpperCase() +
+                                  admin.status.substring(1),
+                              style: TextStyle(
+                                  color: _statusColor,
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.bold)),
+                        ),
+                      ],
+                    ),
                     const SizedBox(height: 2),
-                    Text(admin.email,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                            fontSize: 11, color: theme.disabledColor)),
+                    Text('${admin.email} • ${admin.department}',
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyMedium?.copyWith(fontSize: 11)),
                   ],
                 ),
               ),
-              // Status badge
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: statusColor.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: statusColor.withOpacity(0.5)),
-                ),
-                child: Text(admin.statusLabel,
-                    style: TextStyle(
-                        color: statusColor,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 11)),
+              IconButton(
+                icon: const Icon(Icons.close_rounded, size: 18),
+                onPressed: onClose,
+                color: isDark
+                    ? AppTheme.darkTextSecondary
+                    : AppTheme.lightTextSecondary,
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          // Details
-          Wrap(
-            spacing: 16,
-            runSpacing: 6,
-            children: [
-              _infoChip(theme, Icons.badge_outlined,
-                  admin.facultyId ?? 'N/A'),
-              _infoChip(theme, Icons.school_outlined, admin.department),
-              if (admin.designation != null && admin.designation!.isNotEmpty)
-                _infoChip(theme, Icons.work_outline_rounded, admin.designation!),
-            ],
-          ),
+
           const SizedBox(height: 14),
-          if (isProcessing)
-            const Center(
-              child: SizedBox(
-                width: 22,
-                height: 22,
-                child: CircularProgressIndicator(
-                    strokeWidth: 2, color: AppTheme.primaryColor),
-              ),
-            )
-          else if (actions != null)
-            actions!,
+          const Divider(height: 1),
+          const SizedBox(height: 14),
+
+          // Action buttons row
+          Row(
+            children: [
+              if (onApprove != null)
+                Expanded(
+                  child: _DetailActionBtn(
+                    label: 'Activate',
+                    icon: Icons.check_circle_outline_rounded,
+                    color: _kGreen,
+                    isLoading: isProcessing,
+                    onTap: onApprove!,
+                  ),
+                ),
+              if (onSuspend != null) ...[
+                if (onApprove != null) const SizedBox(width: 10),
+                Expanded(
+                  child: _DetailActionBtn(
+                    label: 'Suspend',
+                    icon: Icons.lock_outline_rounded,
+                    color: _kAmber,
+                    isLoading: isProcessing,
+                    onTap: onSuspend!,
+                  ),
+                ),
+              ],
+              if (onReject != null) ...[
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _DetailActionBtn(
+                    label: 'Reject',
+                    icon: Icons.cancel_outlined,
+                    color: _kRed,
+                    isLoading: isProcessing,
+                    onTap: onReject!,
+                  ),
+                ),
+              ],
+              if (onDelete != null) ...[
+                const SizedBox(width: 10),
+                Container(
+                  height: 40,
+                  width: 40,
+                  decoration: BoxDecoration(
+                    color: _kRed.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: _kRed.withValues(alpha: 0.5)),
+                  ),
+                  child: IconButton(
+                    icon: const Icon(Icons.delete_outline_rounded,
+                        color: _kRed, size: 18),
+                    onPressed: isProcessing ? null : onDelete,
+                    padding: EdgeInsets.zero,
+                  ),
+                ),
+              ],
+            ],
+          ),
         ],
       ),
     );
   }
+}
 
-  Widget _infoChip(ThemeData theme, IconData icon, String label) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 13, color: theme.disabledColor),
-        const SizedBox(width: 4),
-        Text(label,
-            style: theme.textTheme.bodyMedium?.copyWith(fontSize: 12)),
-      ],
+// ─── Admin List Tile ──────────────────────────────────────────────────────────
+
+class _AdminListTile extends StatelessWidget {
+  final UserModel admin;
+  final bool isDark;
+  final bool isSelected;
+  final bool isProcessing;
+  final VoidCallback onTap;
+  final Widget trailing;
+
+  const _AdminListTile({
+    required this.admin,
+    required this.isDark,
+    required this.isSelected,
+    required this.isProcessing,
+    required this.onTap,
+    required this.trailing,
+  });
+
+  Color get _statusColor {
+    switch (admin.status) {
+      case 'active': return _kGreen;
+      case 'pending': return _kAmber;
+      case 'disabled': return _kRed;
+      default: return AppTheme.darkTextSecondary;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final initials = admin.name.isNotEmpty
+        ? admin.name.trim().split(' ').map((w) => w.isNotEmpty ? w[0] : '').take(2).join().toUpperCase()
+        : 'A';
+    final photoUrl = admin.profilePhotoUrl;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? AppTheme.primaryColor.withValues(alpha: 0.08)
+              : (isDark ? AppTheme.darkCard : AppTheme.lightCard),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+              color: isSelected
+                  ? AppTheme.primaryColor.withValues(alpha: 0.5)
+                  : (isDark ? AppTheme.darkBorder : AppTheme.lightBorder)),
+        ),
+        child: Row(
+          children: [
+            // Avatar
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: photoUrl == null || photoUrl.isEmpty
+                    ? const LinearGradient(
+                        colors: [AppTheme.primaryColor, AppTheme.accentColor],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight)
+                    : null,
+                image: photoUrl != null && photoUrl.isNotEmpty
+                    ? DecorationImage(
+                        image: NetworkImage(photoUrl),
+                        fit: BoxFit.cover,
+                        onError: (_, __) {})
+                    : null,
+              ),
+              child: photoUrl == null || photoUrl.isEmpty
+                  ? Center(
+                      child: Text(initials,
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold)))
+                  : null,
+            ),
+            const SizedBox(width: 12),
+            // Info
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(admin.name,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleMedium?.copyWith(
+                                fontSize: 14, fontWeight: FontWeight.w600)),
+                      ),
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: _statusColor.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                            admin.status[0].toUpperCase() +
+                                admin.status.substring(1),
+                            style: TextStyle(
+                                color: _statusColor,
+                                fontSize: 8,
+                                fontWeight: FontWeight.bold)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text('${admin.department} Dept.',
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyMedium?.copyWith(fontSize: 11)),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            trailing,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Filter Chip ──────────────────────────────────────────────────────────────
+
+class _FilterChip extends StatelessWidget {
+  final String label;
+  final bool isSelected;
+  final bool isDark;
+  final VoidCallback onTap;
+
+  const _FilterChip({
+    required this.label,
+    required this.isSelected,
+    required this.isDark,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? AppTheme.primaryColor
+              : (isDark ? AppTheme.darkCard : AppTheme.lightCard),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+              color: isSelected
+                  ? AppTheme.primaryColor
+                  : (isDark ? AppTheme.darkBorder : AppTheme.lightBorder)),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: isSelected
+                ? Colors.white
+                : (isDark
+                    ? AppTheme.darkTextSecondary
+                    : AppTheme.lightTextSecondary),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Action Button ────────────────────────────────────────────────────────────
+
+class _ActionButton extends StatelessWidget {
+  final String label;
+  final Color color;
+  final bool isDark;
+  final bool isLoading;
+  final VoidCallback onTap;
+
+  const _ActionButton({
+    required this.label,
+    required this.color,
+    required this.isDark,
+    required this.isLoading,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: isLoading ? null : onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: color.withValues(alpha: 0.5)),
+        ),
+        child: isLoading
+            ? SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: color))
+            : Text(label,
+                style: TextStyle(
+                    color: color,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold)),
+      ),
+    );
+  }
+}
+
+// ─── Detail Action Button ─────────────────────────────────────────────────────
+
+class _DetailActionBtn extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final Color color;
+  final bool isLoading;
+  final VoidCallback onTap;
+
+  const _DetailActionBtn({
+    required this.label,
+    required this.icon,
+    required this.color,
+    required this.isLoading,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: isLoading ? null : onTap,
+      child: Container(
+        height: 40,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: color.withValues(alpha: 0.5)),
+        ),
+        child: isLoading
+            ? SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2, color: color))
+            : Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(icon, color: color, size: 16),
+                  const SizedBox(width: 6),
+                  Text(label,
+                      style: TextStyle(
+                          color: color,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold)),
+                ],
+              ),
+      ),
+    );
+  }
+}
+
+// ─── Empty State ──────────────────────────────────────────────────────────────
+
+class _EmptyState extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final bool isDark;
+
+  const _EmptyState({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.isDark,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(40),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon,
+                size: 64,
+                color: AppTheme.primaryColor.withValues(alpha: 0.3)),
+            const SizedBox(height: 16),
+            Text(title,
+                style: theme.textTheme.titleMedium
+                    ?.copyWith(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Text(subtitle,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyMedium?.copyWith(fontSize: 13)),
+          ],
+        ),
+      ),
     );
   }
 }

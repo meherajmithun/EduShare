@@ -45,6 +45,14 @@ const userSchema = new mongoose.Schema(
       sparse: true,
     },
 
+    // ─── Semester (students only, 1–12) ────────────────────────────────────
+    semester: {
+      type: Number,
+      default: null,
+      min: 1,
+      max: 12,
+    },
+
     password: {
       type: String,
       required: [true, 'Password is required'],

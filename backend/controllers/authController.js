@@ -167,6 +167,8 @@ const register = async (req, res) => {
     status: 'active',
     // Save Student ID if provided (students only)
     studentId: (role === 'student' && studentId && studentId.trim()) ? studentId.trim() : null,
+    // Semester: extracted from request body if provided
+    semester: (role === 'student' && req.body.semester) ? Number(req.body.semester) : null,
   });
   const token = signToken(user._id);
 
@@ -396,7 +398,7 @@ const getProfile = async (req, res) => {
 
 // ─── PUT /api/auth/profile ────────────────────────────────────────────
 const updateProfile = async (req, res) => {
-  const { name, bio, designation, profilePhotoUrl } = req.body;
+  const { name, bio, designation, profilePhotoUrl, semester } = req.body;
   const user = await User.findById(req.user._id);
   if (!user) throw createError('User not found.', 404);
 
@@ -404,6 +406,9 @@ const updateProfile = async (req, res) => {
   if (bio !== undefined) user.bio = bio.trim();
   if (designation !== undefined) user.designation = designation.trim();
   if (profilePhotoUrl !== undefined) user.profilePhotoUrl = profilePhotoUrl.trim();
+  if (semester !== undefined && semester !== null && !isNaN(Number(semester))) {
+    user.semester = Number(semester);
+  }
 
   await user.save();
   const updatedUser = await User.findById(user._id).select('-password');

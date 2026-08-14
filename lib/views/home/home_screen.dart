@@ -1,15 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:edushare/core/theme.dart';
+import 'package:edushare/core/providers/theme_provider.dart';
+import 'package:edushare/core/providers/user_stats_provider.dart';
 import 'package:edushare/core/services/auth_service.dart';
 import 'package:edushare/core/services/firestore_service.dart';
 import 'package:edushare/models/department_model.dart';
 import 'package:edushare/models/course_model.dart';
 import 'package:edushare/models/material_model.dart';
 import 'package:edushare/models/user_model.dart';
-import 'package:edushare/widgets/glass_card.dart';
 import 'package:edushare/widgets/notification_bell.dart';
-import 'package:edushare/widgets/app_bar_profile_avatar.dart';
 import 'package:edushare/views/course/course_details_screen.dart';
 import 'package:edushare/views/course/video_details_screen.dart';
 import 'package:edushare/views/course/watch_history_screen.dart';
@@ -38,116 +38,56 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _loadData();
+    // Kick off stats fetch (non-blocking)
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<UserStatsProvider>().refresh();
+    });
   }
 
   Future<void> _loadData() async {
     try {
       final depts = await _firestoreService.getDepartments();
+
+      // Load courses for current user's department first, then all others
+      final user = context.read<AuthService>().currentUser;
       List<CourseModel> courses = [];
+      if (user != null && user.departmentId != null && user.departmentId!.isNotEmpty) {
+        // Prefer the user's own department courses first
+        final myDeptCourses = await _firestoreService.getCourses(user.departmentId!);
+        courses.addAll(myDeptCourses);
+      }
+      // Also load other departments' courses so filters work
       for (var dept in depts) {
+        if (user?.departmentId == dept.id) continue; // already loaded
         final deptCourses = await _firestoreService.getCourses(dept.id);
         courses.addAll(deptCourses);
       }
 
       final materials = await _firestoreService.getMaterials();
       final approved = materials.where((m) => m.isApproved).toList();
+      // Sort trending by views descending
+      approved.sort((a, b) => b.views.compareTo(a.views));
 
       if (mounted) {
         setState(() {
           _departments = depts;
-          _allCourses = courses.isNotEmpty ? courses : _getMockCourses();
-          _filteredCourses = _allCourses;
-          _trendingMaterials = approved.isNotEmpty ? approved : _getMockTrendingMaterials();
+          _allCourses = courses;
+          _filteredCourses = courses;
+          _trendingMaterials = approved.take(10).toList();
           _isLoading = false;
         });
       }
     } catch (e) {
       if (mounted) {
         setState(() {
-          _departments = _getMockDepartments();
-          _allCourses = _getMockCourses();
-          _filteredCourses = _allCourses;
-          _trendingMaterials = _getMockTrendingMaterials();
+          _departments = [];
+          _allCourses = [];
+          _filteredCourses = [];
+          _trendingMaterials = [];
           _isLoading = false;
         });
       }
     }
-  }
-
-  List<DepartmentModel> _getMockDepartments() {
-    return [
-      DepartmentModel(id: 'cse', name: 'Computer Science', code: 'CSE'),
-      DepartmentModel(id: 'bba', name: 'Business Admin', code: 'BBA'),
-      DepartmentModel(id: 'eee', name: 'Electrical Eng', code: 'EEE'),
-      DepartmentModel(id: 'arts', name: 'Arts & Design', code: 'Arts'),
-    ];
-  }
-
-  List<CourseModel> _getMockCourses() {
-    return [
-      const CourseModel(
-        id: 'cs301',
-        name: 'Database Systems',
-        code: 'CSE-301',
-        departmentId: 'cse',
-      ),
-      const CourseModel(
-        id: 'cs102',
-        name: 'Data Structures',
-        code: 'CSE-102',
-        departmentId: 'cse',
-      ),
-      const CourseModel(
-        id: 'eee201',
-        name: 'Circuit Analysis',
-        code: 'EEE-201',
-        departmentId: 'eee',
-      ),
-      const CourseModel(
-        id: 'bba101',
-        name: 'Principles of Mgt',
-        code: 'BBA-101',
-        departmentId: 'bba',
-      ),
-    ];
-  }
-
-  List<MaterialModel> _getMockTrendingMaterials() {
-    return [
-      MaterialModel(
-        id: 'trend1',
-        title: 'B+ Trees & Indexing Cheatsheet',
-        description: 'Database Systems Notes',
-        departmentId: 'cse',
-        department: 'CSE',
-        courseId: 'cs301',
-        type: 'pdf',
-        fileUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
-        uploadedBy: 'Prof. Alan Turing',
-        contributorName: 'Prof. Alan Turing',
-        views: 1420,
-        avgRating: 4.9,
-        totalRatings: 32,
-        createdAt: DateTime.now(),
-      ),
-      MaterialModel(
-        id: 'trend2',
-        title: 'Cache Coherence & Pipelining Demo',
-        description: 'Computer Architecture Video',
-        departmentId: 'cse',
-        department: 'CSE',
-        courseId: 'cs102',
-        type: 'video',
-        videoLink: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-        videoSource: 'youtube',
-        uploadedBy: 'Prof. Ada Lovelace',
-        contributorName: 'Prof. Ada Lovelace',
-        views: 2800,
-        avgRating: 4.8,
-        totalRatings: 54,
-        createdAt: DateTime.now(),
-      ),
-    ];
   }
 
   void _selectDepartment(DepartmentModel? dept) {
@@ -156,7 +96,9 @@ class _HomeScreenState extends State<HomeScreen> {
       if (dept == null) {
         _filteredCourses = _allCourses;
       } else {
-        _filteredCourses = _allCourses.where((c) => c.departmentId == dept.id || c.code.contains(dept.code)).toList();
+        _filteredCourses = _allCourses
+            .where((c) => c.departmentId == dept.id || c.code.contains(dept.code))
+            .toList();
       }
     });
   }
@@ -164,10 +106,10 @@ class _HomeScreenState extends State<HomeScreen> {
   void _launchMaterial(MaterialModel m) {
     if (m.type == 'video' || m.videoPlaybackUrl != null || m.isYouTube || m.isCloudinaryVideo) {
       final course = CourseModel(
-        id: m.courseId.isNotEmpty ? m.courseId : 'cs301',
-        name: m.department.isNotEmpty ? m.department : 'Database Systems',
-        code: 'CSE-301',
-        departmentId: m.departmentId.isNotEmpty ? m.departmentId : 'cse',
+        id: m.courseId.isNotEmpty ? m.courseId : 'unknown',
+        name: m.department.isNotEmpty ? m.department : 'Course',
+        code: '',
+        departmentId: m.departmentId.isNotEmpty ? m.departmentId : 'unknown',
       );
       Navigator.of(context).push(
         MaterialPageRoute(
@@ -190,11 +132,34 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  String _greeting() {
+    final hour = DateTime.now().hour;
+    if (hour < 12) return 'Good Morning,';
+    if (hour < 17) return 'Good Afternoon,';
+    return 'Good Evening,';
+  }
+
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final currentUser = context.select<AuthService, UserModel?>((s) => s.currentUser);
+    final stats = context.watch<UserStatsProvider>();
+    final themeProvider = context.read<ThemeProvider>();
+
+    // Dynamic role badge label — never show internal names
+    final roleBadge = () {
+      switch (currentUser?.role) {
+        case 'contributor':
+          return 'CONTRIBUTOR';
+        case 'faculty_admin':
+        case 'admin':
+          return 'ADMIN';
+        case 'super_admin':
+          return 'ADMIN';
+        default:
+          return 'STUDENT';
+      }
+    }();
 
     return Scaffold(
       backgroundColor: isDark ? AppTheme.darkBackground : AppTheme.lightBackground,
@@ -234,13 +199,13 @@ class _HomeScreenState extends State<HomeScreen> {
               borderRadius: BorderRadius.circular(20),
               border: Border.all(color: AppTheme.primaryColor.withOpacity(0.5)),
             ),
-            child: const Row(
+            child: Row(
               children: [
-                Icon(Icons.circle, color: AppTheme.primaryColor, size: 8),
-                SizedBox(width: 6),
+                const Icon(Icons.circle, color: AppTheme.primaryColor, size: 8),
+                const SizedBox(width: 6),
                 Text(
-                  'STUDENT DASHBOARD',
-                  style: TextStyle(
+                  '$roleBadge DASHBOARD',
+                  style: const TextStyle(
                     color: AppTheme.primaryColor,
                     fontSize: 10,
                     fontWeight: FontWeight.bold,
@@ -252,303 +217,414 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // User Profile Greeting Header
-                  Row(
-                    children: [
-                      const AppBarProfileAvatar(),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Text(
-                                  'Good Morning,',
-                                  style: TextStyle(
-                                    color: Colors.white.withOpacity(0.6),
-                                    fontSize: 12,
-                                  ),
+          ? const Center(child: CircularProgressIndicator(color: AppTheme.primaryColor))
+          : RefreshIndicator(
+              color: AppTheme.primaryColor,
+              onRefresh: () async {
+                await _loadData();
+                if (mounted) context.read<UserStatsProvider>().refresh(force: true);
+              },
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // ── User Profile Greeting Header ────────────────────────
+                    Row(
+                      children: [
+                        // Avatar
+                        GestureDetector(
+                          onTap: () {
+                            // Navigate to profile via shell tabs — handled by parent
+                          },
+                          child: _UserAvatar(user: currentUser),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _greeting(),
+                                style: TextStyle(
+                                  color: isDark
+                                      ? AppTheme.darkTextSecondary
+                                      : AppTheme.lightTextSecondary,
+                                  fontSize: 12,
                                 ),
-                              ],
-                            ),
-                            Row(
-                              children: [
-                                Text(
-                                  currentUser?.name ?? 'John Doe',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 17,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                const SizedBox(width: 6),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: AppTheme.primaryColor,
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: const Text(
-                                    'STUDENT',
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 9,
-                                      fontWeight: FontWeight.bold,
+                              ),
+                              Row(
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      currentUser?.name.split(' ').first ?? '...',
+                                      style: TextStyle(
+                                        color: isDark
+                                            ? AppTheme.darkTextPrimary
+                                            : AppTheme.lightTextPrimary,
+                                        fontSize: 17,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
                                     ),
                                   ),
-                                ),
-                              ],
+                                  const SizedBox(width: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: AppTheme.primaryColor,
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Text(
+                                      roleBadge,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                        // Dark/Light mode toggle wired to ThemeProvider
+                        IconButton(
+                          icon: Icon(
+                            isDark ? Icons.wb_sunny_rounded : Icons.nightlight_round,
+                            color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+                            size: 20,
+                          ),
+                          onPressed: () {
+                            themeProvider.setTheme(
+                              isDark ? ThemeMode.light : ThemeMode.dark,
+                            );
+                          },
+                        ),
+                        const NotificationBell(),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+
+                    // ── Search Bar ──────────────────────────────────────────
+                    GestureDetector(
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(builder: (_) => const SearchScreen()),
+                        );
+                      },
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: isDark ? AppTheme.darkSurface : AppTheme.lightCard,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
+                          ),
+                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                        child: Row(
+                          children: [
+                            Icon(Icons.search_rounded,
+                                color: isDark
+                                    ? AppTheme.darkTextSecondary
+                                    : AppTheme.lightTextSecondary),
+                            const SizedBox(width: 12),
+                            Text(
+                              'Search courses, notes, or contributors...',
+                              style: TextStyle(
+                                color: isDark
+                                    ? AppTheme.darkTextSecondary
+                                    : AppTheme.lightTextSecondary,
+                                fontSize: 13,
+                              ),
                             ),
                           ],
                         ),
                       ),
-                      // Action Icons: Dark Mode + Bell
-                      IconButton(
-                        icon: const Icon(Icons.nightlight_round, color: Colors.white70, size: 20),
-                        onPressed: () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Toggled Dark Mode')),
-                          );
-                        },
-                      ),
-                      const NotificationBell(),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-
-                  // Search Bar Input
-                  GestureDetector(
-                    onTap: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => const SearchScreen()),
-                      );
-                    },
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: isDark ? AppTheme.darkSurface : AppTheme.lightCard,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(
-                          color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
-                        ),
-                      ),
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                      child: const Row(
-                        children: [
-                          Icon(Icons.search_rounded, color: AppTheme.darkTextSecondary),
-                          SizedBox(width: 12),
-                          Text(
-                            'Search courses, notes, or contributors...',
-                            style: TextStyle(color: AppTheme.darkTextSecondary, fontSize: 13),
-                          ),
-                        ],
-                      ),
                     ),
-                  ),
-                  const SizedBox(height: 16),
+                    const SizedBox(height: 16),
 
-                  // Department Filter Chips
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: ChoiceChip(
-                            label: const Text('All Departments'),
-                            selected: _selectedDept == null,
-                            selectedColor: AppTheme.primaryColor,
-                            backgroundColor: isDark ? AppTheme.darkSurface : AppTheme.lightCard,
-                            labelStyle: TextStyle(
-                              color: _selectedDept == null ? Colors.white : Colors.white60,
-                              fontWeight: _selectedDept == null ? FontWeight.bold : FontWeight.normal,
-                              fontSize: 12,
+                    // ── Department Filter Chips ──────────────────────────────
+                    if (_departments.isNotEmpty)
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: ChoiceChip(
+                                label: const Text('All'),
+                                selected: _selectedDept == null,
+                                selectedColor: AppTheme.primaryColor,
+                                backgroundColor:
+                                    isDark ? AppTheme.darkSurface : AppTheme.lightCard,
+                                labelStyle: TextStyle(
+                                  color: _selectedDept == null
+                                      ? Colors.white
+                                      : (isDark
+                                          ? AppTheme.darkTextSecondary
+                                          : AppTheme.lightTextSecondary),
+                                  fontWeight: _selectedDept == null
+                                      ? FontWeight.bold
+                                      : FontWeight.normal,
+                                  fontSize: 12,
+                                ),
+                                onSelected: (_) => _selectDepartment(null),
+                              ),
                             ),
-                            onSelected: (_) => _selectDepartment(null),
+                            ..._departments.map((dept) {
+                              final isSel = _selectedDept?.id == dept.id;
+                              return Padding(
+                                padding: const EdgeInsets.only(right: 8),
+                                child: ChoiceChip(
+                                  label: Text(dept.code),
+                                  selected: isSel,
+                                  selectedColor: AppTheme.primaryColor,
+                                  backgroundColor:
+                                      isDark ? AppTheme.darkSurface : AppTheme.lightCard,
+                                  labelStyle: TextStyle(
+                                    color: isSel
+                                        ? Colors.white
+                                        : (isDark
+                                            ? AppTheme.darkTextSecondary
+                                            : AppTheme.lightTextSecondary),
+                                    fontWeight:
+                                        isSel ? FontWeight.bold : FontWeight.normal,
+                                    fontSize: 12,
+                                  ),
+                                  onSelected: (_) => _selectDepartment(dept),
+                                ),
+                              );
+                            }),
+                          ],
+                        ),
+                      ),
+                    const SizedBox(height: 20),
+
+                    // ── 3 Metric Grid Cards (Real stats from UserStatsProvider) ──
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _MetricCard(
+                            icon: Icons.file_download_outlined,
+                            iconColor: const Color(0xFF3B82F6),
+                            count: stats.isLoading ? '–' : '${stats.downloads}',
+                            label: 'ENGAGED',
+                            isDark: isDark,
+                            onTap: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                    builder: (_) => const WatchHistoryScreen()),
+                              );
+                            },
                           ),
                         ),
-                        ..._departments.map((dept) {
-                          final isSel = _selectedDept?.id == dept.id;
-                          return Padding(
-                            padding: const EdgeInsets.only(right: 8),
-                            child: ChoiceChip(
-                              label: Text(dept.code),
-                              selected: isSel,
-                              selectedColor: AppTheme.primaryColor,
-                              backgroundColor: isDark ? AppTheme.darkSurface : AppTheme.lightCard,
-                              labelStyle: TextStyle(
-                                color: isSel ? Colors.white : Colors.white60,
-                                fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
-                                fontSize: 12,
-                              ),
-                              onSelected: (_) => _selectDepartment(dept),
-                            ),
-                          );
-                        }),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: _MetricCard(
+                            icon: Icons.bookmark_border_rounded,
+                            iconColor: const Color(0xFF10B981),
+                            count: stats.isLoading ? '–' : '${stats.savedNotes}',
+                            label: 'SAVED NOTES',
+                            isDark: isDark,
+                            onTap: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                    builder: (_) => const SavedResourcesScreen()),
+                              );
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: _MetricCard(
+                            icon: Icons.check_circle_outline_rounded,
+                            iconColor: const Color(0xFF8B5CF6),
+                            count: stats.isLoading ? '–' : '${stats.completed}',
+                            label: 'COMPLETED',
+                            isDark: isDark,
+                            onTap: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                    builder: (_) => const WatchHistoryScreen()),
+                              );
+                            },
+                          ),
+                        ),
                       ],
                     ),
-                  ),
-                  const SizedBox(height: 20),
+                    const SizedBox(height: 24),
 
-                  // 3 Metric Grid Cards Row
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _MetricCard(
-                          icon: Icons.file_download_outlined,
-                          iconColor: const Color(0xFF3B82F6),
-                          count: '124',
-                          label: 'DOWNLOADS',
-                          onTap: () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(builder: (_) => const SavedResourcesScreen()),
-                            );
-                          },
+                    // ── Available Courses Section ───────────────────────────
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Available Courses',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: isDark
+                                ? AppTheme.darkTextPrimary
+                                : AppTheme.lightTextPrimary,
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: _MetricCard(
-                          icon: Icons.bookmark_border_rounded,
-                          iconColor: const Color(0xFF10B981),
-                          count: '48',
-                          label: 'SAVED NOTES',
-                          onTap: () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(builder: (_) => const SavedResourcesScreen()),
-                            );
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: _MetricCard(
-                          icon: Icons.check_circle_outline_rounded,
-                          iconColor: const Color(0xFF8B5CF6),
-                          count: '12',
-                          label: 'COMPLETED',
-                          onTap: () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(builder: (_) => const WatchHistoryScreen()),
-                            );
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-
-                  // Continue Learning Section
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'Continue Learning',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
-                      ),
-                      GestureDetector(
-                        onTap: () {
-                          if (_filteredCourses.isNotEmpty) {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(builder: (_) => CourseDetailsScreen(course: _filteredCourses.first)),
-                            );
-                          }
-                        },
-                        child: const Text(
-                          'View All',
-                          style: TextStyle(color: AppTheme.primaryColor, fontSize: 12, fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-
-                  // Course Progress Cards
-                  _CourseProgressCard(
-                    title: 'Database Systems',
-                    instructor: 'Prof. Alan Turing',
-                    progress: 0.75,
-                    percentageText: '75%',
-                    icon: Icons.storage_rounded,
-                    iconColor: const Color(0xFF3B82F6),
-                    onTap: () {
-                      final c = _allCourses.firstWhere(
-                        (element) => element.name.contains('Database'),
-                        orElse: () => _getMockCourses().first,
-                      );
-                      Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => CourseDetailsScreen(course: c)),
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 10),
-                  _CourseProgressCard(
-                    title: 'Data Structures',
-                    instructor: 'Prof. Ada Lovelace',
-                    progress: 0.40,
-                    percentageText: '40%',
-                    icon: Icons.code_rounded,
-                    iconColor: const Color(0xFFEF4444),
-                    onTap: () {
-                      final c = _allCourses.firstWhere(
-                        (element) => element.name.contains('Data'),
-                        orElse: () => _getMockCourses()[1],
-                      );
-                      Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => CourseDetailsScreen(course: c)),
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 24),
-
-                  // Trending Notes Section
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'Trending Notes',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
-                      ),
-                      GestureDetector(
-                        onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(builder: (_) => const SavedResourcesScreen()),
-                          );
-                        },
-                        child: const Text(
-                          'Explore',
-                          style: TextStyle(color: AppTheme.primaryColor, fontSize: 12, fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-
-                  // Trending Cards Horizontal Scroll
-                  SizedBox(
-                    height: 160,
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: _trendingMaterials.length,
-                      separatorBuilder: (_, __) => const SizedBox(width: 12),
-                      itemBuilder: (context, index) {
-                        final item = _trendingMaterials[index];
-                        return _TrendingCard(
-                          material: item,
-                          onTap: () => _launchMaterial(item),
-                        );
-                      },
+                        if (_filteredCourses.isNotEmpty)
+                          GestureDetector(
+                            onTap: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      CourseDetailsScreen(course: _filteredCourses.first),
+                                ),
+                              );
+                            },
+                            child: const Text(
+                              'View All',
+                              style: TextStyle(
+                                color: AppTheme.primaryColor,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 12),
+
+                    if (_filteredCourses.isEmpty)
+                      _EmptyState(
+                        icon: Icons.menu_book_rounded,
+                        message: 'No courses available yet.',
+                        isDark: isDark,
+                      )
+                    else
+                      ..._filteredCourses.take(3).map((course) => Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: _CourseCard(
+                              course: course,
+                              isDark: isDark,
+                              onTap: () => Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => CourseDetailsScreen(course: course),
+                                ),
+                              ),
+                            ),
+                          )),
+                    const SizedBox(height: 24),
+
+                    // ── Trending Notes Section ──────────────────────────────
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Trending Notes',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: isDark
+                                ? AppTheme.darkTextPrimary
+                                : AppTheme.lightTextPrimary,
+                          ),
+                        ),
+                        GestureDetector(
+                          onTap: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                  builder: (_) => const SearchScreen()),
+                            );
+                          },
+                          child: const Text(
+                            'Explore',
+                            style: TextStyle(
+                              color: AppTheme.primaryColor,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+
+                    if (_trendingMaterials.isEmpty)
+                      _EmptyState(
+                        icon: Icons.article_rounded,
+                        message: 'No approved materials yet.',
+                        isDark: isDark,
+                      )
+                    else
+                      SizedBox(
+                        height: 160,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: _trendingMaterials.length,
+                          separatorBuilder: (_, __) => const SizedBox(width: 12),
+                          itemBuilder: (context, index) {
+                            final item = _trendingMaterials[index];
+                            return _TrendingCard(
+                              material: item,
+                              isDark: isDark,
+                              onTap: () => _launchMaterial(item),
+                            );
+                          },
+                        ),
+                      ),
+                    const SizedBox(height: 24),
+                  ],
+                ),
               ),
             ),
+    );
+  }
+}
+
+// ─── Sub-widgets ────────────────────────────────────────────────────────────
+
+class _UserAvatar extends StatelessWidget {
+  final UserModel? user;
+  const _UserAvatar({required this.user});
+
+  @override
+  Widget build(BuildContext context) {
+    final photoUrl = user?.profilePhotoUrl;
+    final name = user?.name ?? '';
+    final initials = name.isNotEmpty
+        ? name.trim().split(' ').map((w) => w.isNotEmpty ? w[0] : '').take(2).join().toUpperCase()
+        : '?';
+
+    return Container(
+      width: 42,
+      height: 42,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: (photoUrl == null || photoUrl.isEmpty)
+            ? const LinearGradient(
+                colors: [AppTheme.primaryColor, AppTheme.accentColor],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              )
+            : null,
+        image: (photoUrl != null && photoUrl.isNotEmpty)
+            ? DecorationImage(
+                image: NetworkImage(photoUrl),
+                fit: BoxFit.cover,
+                onError: (_, __) {},
+              )
+            : null,
+        border: Border.all(color: AppTheme.primaryColor.withOpacity(0.5), width: 2),
+      ),
+      child: (photoUrl == null || photoUrl.isEmpty)
+          ? Center(
+              child: Text(
+                initials,
+                style: const TextStyle(
+                    color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+              ),
+            )
+          : null,
     );
   }
 }
@@ -558,6 +634,7 @@ class _MetricCard extends StatelessWidget {
   final Color iconColor;
   final String count;
   final String label;
+  final bool isDark;
   final VoidCallback onTap;
 
   const _MetricCard({
@@ -565,13 +642,12 @@ class _MetricCard extends StatelessWidget {
     required this.iconColor,
     required this.count,
     required this.label,
+    required this.isDark,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
 
     return GestureDetector(
       onTap: onTap,
@@ -597,8 +673,8 @@ class _MetricCard extends StatelessWidget {
             const SizedBox(height: 8),
             Text(
               count,
-              style: const TextStyle(
-                color: Colors.white,
+              style: TextStyle(
+                color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
               ),
@@ -607,7 +683,9 @@ class _MetricCard extends StatelessWidget {
             Text(
               label,
               style: TextStyle(
-                color: Colors.white.withOpacity(0.5),
+                color: isDark
+                    ? AppTheme.darkTextSecondary
+                    : AppTheme.lightTextSecondary,
                 fontSize: 9,
                 fontWeight: FontWeight.bold,
               ),
@@ -619,29 +697,19 @@ class _MetricCard extends StatelessWidget {
   }
 }
 
-class _CourseProgressCard extends StatelessWidget {
-  final String title;
-  final String instructor;
-  final double progress;
-  final String percentageText;
-  final IconData icon;
-  final Color iconColor;
+class _CourseCard extends StatelessWidget {
+  final CourseModel course;
+  final bool isDark;
   final VoidCallback onTap;
 
-  const _CourseProgressCard({
-    required this.title,
-    required this.instructor,
-    required this.progress,
-    required this.percentageText,
-    required this.icon,
-    required this.iconColor,
+  const _CourseCard({
+    required this.course,
+    required this.isDark,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
 
     return GestureDetector(
       onTap: onTap,
@@ -654,62 +722,49 @@ class _CourseProgressCard extends StatelessWidget {
             color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
           ),
         ),
-        child: Column(
+        child: Row(
           children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: iconColor.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Icon(icon, color: iconColor, size: 20),
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [AppTheme.primaryColor, AppTheme.accentColor],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        instructor,
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.5),
-                          fontSize: 11,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Text(
-                  percentageText,
-                  style: const TextStyle(
-                    color: AppTheme.primaryColor,
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(Icons.menu_book_rounded, color: Colors.white, size: 22),
             ),
-            const SizedBox(height: 12),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: LinearProgressIndicator(
-                value: progress,
-                backgroundColor: Colors.white12,
-                color: AppTheme.primaryColor,
-                minHeight: 4,
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    course.name,
+                    style: TextStyle(
+                      color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    course.code,
+                    style: TextStyle(
+                      color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
               ),
             ),
+            Icon(Icons.arrow_forward_ios_rounded,
+                size: 14,
+                color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary),
           ],
         ),
       ),
@@ -719,15 +774,13 @@ class _CourseProgressCard extends StatelessWidget {
 
 class _TrendingCard extends StatelessWidget {
   final MaterialModel material;
+  final bool isDark;
   final VoidCallback onTap;
 
-  const _TrendingCard({required this.material, required this.onTap});
+  const _TrendingCard({required this.material, required this.isDark, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -777,7 +830,8 @@ class _TrendingCard extends StatelessWidget {
                         ),
                         child: Text(
                           material.type.toUpperCase(),
-                          style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
+                          style: const TextStyle(
+                              color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
                         ),
                       ),
                     ),
@@ -790,7 +844,11 @@ class _TrendingCard extends StatelessWidget {
               material.title,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+              ),
             ),
             const SizedBox(height: 4),
             Row(
@@ -798,15 +856,20 @@ class _TrendingCard extends StatelessWidget {
               children: [
                 Text(
                   '${material.views} views',
-                  style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 9),
+                  style: TextStyle(
+                    color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+                    fontSize: 9,
+                  ),
                 ),
                 Row(
                   children: [
-                    const Icon(Icons.star_rounded, size: 10, color: Color(0xFFF59E0B)),
-                    const SizedBox(width: 2),
+                    const Icon(Icons.star_rounded, color: Color(0xFFF59E0B), size: 11),
                     Text(
                       material.avgRating.toStringAsFixed(1),
-                      style: const TextStyle(color: Color(0xFFF59E0B), fontSize: 9, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+                        fontSize: 9,
+                      ),
                     ),
                   ],
                 ),
@@ -814,6 +877,47 @@ class _TrendingCard extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _EmptyState extends StatelessWidget {
+  final IconData icon;
+  final String message;
+  final bool isDark;
+
+  const _EmptyState({
+    required this.icon,
+    required this.message,
+    required this.isDark,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: isDark ? AppTheme.darkSurface : AppTheme.lightCard,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder),
+      ),
+      child: Column(
+        children: [
+          Icon(icon,
+              size: 36,
+              color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary),
+          const SizedBox(height: 8),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+              fontSize: 13,
+            ),
+          ),
+        ],
       ),
     );
   }

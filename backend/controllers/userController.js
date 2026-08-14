@@ -132,4 +132,61 @@ const deleteUser = async (req, res) => {
   res.json(success(null, `${user.name}'s account has been permanently deleted.`));
 };
 
-module.exports = { getUsers, getUserById, updateUserRole, deleteUser };
+// ─── GET /api/users/me/stats ──────────────────────────────────────────
+// Returns learning statistics for the currently logged-in user.
+// All roles can call this; stats are computed from VideoProgress & VideoBookmark.
+const getMyStats = async (req, res) => {
+  const userId = req.user._id;
+
+  const [progressRecords, bookmarks] = await Promise.all([
+    VideoProgress.find({ userId }),
+    VideoBookmark.find({ userId }),
+  ]);
+
+  const completed = progressRecords.filter((p) => p.completed).length;
+  const downloads = progressRecords.length; // each progress entry = an engaged resource
+  const savedNotes = bookmarks.length;
+
+  // ── Weekly activity (last 7 days) ──────────────────────────────────
+  // Derive approximate study hours from video watch time stored in lastPosition.
+  const today = new Date();
+  const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  // Build a map: dayLabel -> total seconds watched that day
+  const daySeconds = {};
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    daySeconds[DAYS[d.getDay()]] = 0;
+  }
+
+  // Aggregate seconds per day-of-week from updatedAt timestamps
+  for (const p of progressRecords) {
+    const updatedAt = p.updatedAt || p.lastWatchedAt;
+    if (!updatedAt) continue;
+    const diffDays = Math.floor((today - updatedAt) / (1000 * 60 * 60 * 24));
+    if (diffDays >= 0 && diffDays <= 6) {
+      const label = DAYS[updatedAt.getDay()];
+      if (label in daySeconds) {
+        daySeconds[label] += p.lastPosition || 0;
+      }
+    }
+  }
+
+  // Convert seconds → hours (rounded to 1 decimal)
+  const weeklyActivity = Object.entries(daySeconds).map(([day, seconds]) => ({
+    day,
+    hours: Math.round((seconds / 3600) * 10) / 10,
+  }));
+
+  const totalHours = weeklyActivity.reduce((acc, d) => acc + d.hours, 0);
+
+  res.json(
+    require('../utils/apiResponse').success(
+      { downloads, savedNotes, completed, weeklyActivity, totalWeeklyHours: Math.round(totalHours * 10) / 10 },
+      'Stats fetched successfully.'
+    )
+  );
+};
+
+module.exports = { getUsers, getUserById, updateUserRole, deleteUser, getMyStats };
