@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:edushare/core/theme.dart';
 import 'package:edushare/core/services/firestore_service.dart';
 import 'package:edushare/models/material_model.dart';
@@ -24,16 +26,45 @@ class _SavedResourcesScreenState extends State<SavedResourcesScreen> {
   String _selectedCategory = 'All';
   String? _selectedFolder;
 
-  final List<Map<String, dynamic>> _folders = [
-    {'name': 'CS245 DB', 'count': 12, 'updated': 'Updated 2d ago', 'color': const Color(0xFF3B82F6)},
-    {'name': 'Midterm Prep', 'count': 8, 'updated': 'Updated 1w ago', 'color': const Color(0xFF8B5CF6)},
-    {'name': 'Algorithms', 'count': 5, 'updated': 'Updated 3w ago', 'color': const Color(0xFFF59E0B)},
-  ];
+  List<Map<String, dynamic>> _folders = [];
 
   @override
   void initState() {
     super.initState();
+    _loadUserFolders();
     _loadSavedResources();
+  }
+
+  Future<void> _loadUserFolders() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final String? folderJson = prefs.getString('user_saved_folders');
+      if (folderJson != null && folderJson.isNotEmpty) {
+        final List<dynamic> decoded = jsonDecode(folderJson);
+        if (mounted) {
+          setState(() {
+            _folders = decoded.map((item) => {
+              'name': item['name'] as String? ?? 'Folder',
+              'count': item['count'] as int? ?? 0,
+              'updated': item['updated'] as String? ?? 'Just now',
+              'color': const Color(0xFF3B82F6),
+            }).toList();
+          });
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _saveUserFolders() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final String encoded = jsonEncode(_folders.map((f) => {
+        'name': f['name'],
+        'count': f['count'] ?? 0,
+        'updated': f['updated'] ?? 'Just now',
+      }).toList());
+      await prefs.setString('user_saved_folders', encoded);
+    } catch (_) {}
   }
 
   @override
@@ -135,14 +166,16 @@ class _SavedResourcesScreenState extends State<SavedResourcesScreen> {
             style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryColor),
             onPressed: () {
               if (folderController.text.trim().isNotEmpty) {
+                final newFolder = {
+                  'name': folderController.text.trim(),
+                  'count': 0,
+                  'updated': 'Just now',
+                  'color': AppTheme.primaryColor,
+                };
                 setState(() {
-                  _folders.add({
-                    'name': folderController.text.trim(),
-                    'count': 0,
-                    'updated': 'Just now',
-                    'color': AppTheme.primaryColor,
-                  });
+                  _folders.add(newFolder);
                 });
+                _saveUserFolders();
                 Navigator.pop(ctx);
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(content: Text('Folder "${folderController.text.trim()}" created!')),
@@ -400,96 +433,151 @@ class _SavedResourcesScreenState extends State<SavedResourcesScreen> {
                     ],
                   ),
                   const SizedBox(height: 12),
-                  SizedBox(
-                    height: 100,
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: _folders.length,
-                      separatorBuilder: (_, __) => const SizedBox(width: 12),
-                      itemBuilder: (context, index) {
-                        final folder = _folders[index];
-                        final isSelected = _selectedFolder == folder['name'];
-                        final folderColor = folder['color'] as Color;
+                  if (_folders.isEmpty)
+                    GestureDetector(
+                      onTap: _showCreateFolderDialog,
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(vertical: 22, horizontal: 16),
+                        decoration: BoxDecoration(
+                          color: isDark ? AppTheme.darkSurface : AppTheme.lightCard,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
+                          ),
+                        ),
+                        child: const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.create_new_folder_outlined, color: AppTheme.primaryColor, size: 20),
+                            SizedBox(width: 8),
+                            Text(
+                              'No folders created yet. Tap + New Folder to create',
+                              style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w500),
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                  else
+                    SizedBox(
+                      height: 100,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: _folders.length,
+                        separatorBuilder: (_, __) => const SizedBox(width: 12),
+                        itemBuilder: (context, index) {
+                          final folder = _folders[index];
+                          final isSelected = _selectedFolder == folder['name'];
+                          final folderColor = folder['color'] as Color;
 
-                        return GestureDetector(
-                          onTap: () {
-                            setState(() {
-                              _selectedFolder = isSelected ? null : folder['name'] as String;
-                              _filterResources(_searchController.text);
-                            });
-                          },
-                          child: Container(
-                            width: 140,
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: isSelected
-                                  ? folderColor.withOpacity(0.2)
-                                  : isDark
-                                      ? AppTheme.darkSurface
-                                      : AppTheme.lightCard,
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(
+                          return GestureDetector(
+                            onTap: () {
+                              setState(() {
+                                _selectedFolder = isSelected ? null : folder['name'] as String;
+                                _filterResources(_searchController.text);
+                              });
+                            },
+                            onLongPress: () {
+                              showDialog(
+                                context: context,
+                                builder: (ctx) => AlertDialog(
+                                  backgroundColor: AppTheme.darkSurface,
+                                  title: Text('Delete "${folder['name']}"?', style: const TextStyle(color: Colors.white)),
+                                  content: const Text('Are you sure you want to delete this folder?', style: TextStyle(color: Colors.white70)),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(ctx),
+                                      child: const Text('Cancel', style: TextStyle(color: Colors.white70)),
+                                    ),
+                                    ElevatedButton(
+                                      style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+                                      onPressed: () {
+                                        setState(() {
+                                          if (_selectedFolder == folder['name']) _selectedFolder = null;
+                                          _folders.removeAt(index);
+                                        });
+                                        _saveUserFolders();
+                                        Navigator.pop(ctx);
+                                      },
+                                      child: const Text('Delete', style: TextStyle(color: Colors.white)),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                            child: Container(
+                              width: 140,
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
                                 color: isSelected
-                                    ? folderColor
+                                    ? folderColor.withOpacity(0.2)
                                     : isDark
-                                        ? AppTheme.darkBorder
-                                        : AppTheme.lightBorder,
+                                        ? AppTheme.darkSurface
+                                        : AppTheme.lightCard,
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(
+                                  color: isSelected
+                                      ? folderColor
+                                      : isDark
+                                          ? AppTheme.darkBorder
+                                          : AppTheme.lightBorder,
+                                ),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.all(6),
+                                        decoration: BoxDecoration(
+                                          color: folderColor.withOpacity(0.2),
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        child: Icon(Icons.folder_rounded, color: folderColor, size: 18),
+                                      ),
+                                      Text(
+                                        '${folder['count']}',
+                                        style: TextStyle(
+                                          color: Colors.white.withOpacity(0.7),
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        folder['name'] as String,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      Text(
+                                        folder['updated'] as String,
+                                        style: TextStyle(
+                                          color: Colors.white.withOpacity(0.4),
+                                          fontSize: 9,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
                               ),
                             ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Container(
-                                      padding: const EdgeInsets.all(6),
-                                      decoration: BoxDecoration(
-                                        color: folderColor.withOpacity(0.2),
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                      child: Icon(Icons.folder_rounded, color: folderColor, size: 18),
-                                    ),
-                                    Text(
-                                      '${folder['count']}',
-                                      style: TextStyle(
-                                        color: Colors.white.withOpacity(0.7),
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      folder['name'] as String,
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                    Text(
-                                      folder['updated'] as String,
-                                      style: TextStyle(
-                                        color: Colors.white.withOpacity(0.4),
-                                        fontSize: 9,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
+                          );
+                        },
+                      ),
                     ),
-                  ),
                   const SizedBox(height: 24),
 
                   // Saved Items Section
