@@ -17,7 +17,7 @@ void main() async {
 
   await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
 
-  final initialIsDark = await ThemeProvider.loadSavedIsDark();
+  final initialMode = await ThemeProvider.loadSavedMode();
 
   final authService = AuthService();
   await authService.restoreSession();
@@ -41,7 +41,7 @@ void main() async {
         ChangeNotifierProvider<UserStatsProvider>.value(
             value: userStatsProvider),
         ChangeNotifierProvider(
-          create: (_) => ThemeProvider(initialIsDark: initialIsDark),
+          create: (_) => ThemeProvider(initialMode: initialMode),
         ),
       ],
       child: const MyApp(),
