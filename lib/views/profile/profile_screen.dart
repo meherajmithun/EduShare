@@ -531,26 +531,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   MaterialPageRoute(builder: (_) => const EditProfileScreen()),
                 ),
               ),
-              const SizedBox(height: 10),
-              _QuickAction(
-                icon: Icons.bookmark_rounded,
-                label: 'Saved Resources',
-                subtitle: '${stats.savedNotes} bookmarked items',
-                isDark: isDark,
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const SavedResourcesScreen()),
+              if (user.role == 'student') ...[
+                const SizedBox(height: 10),
+                _QuickAction(
+                  icon: Icons.bookmark_rounded,
+                  label: 'Saved Resources',
+                  subtitle: '${stats.savedNotes} bookmarked items',
+                  isDark: isDark,
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const SavedResourcesScreen()),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 10),
-              _QuickAction(
-                icon: Icons.history_rounded,
-                label: 'Watch History',
-                subtitle: '${stats.completed} completed videos',
-                isDark: isDark,
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const WatchHistoryScreen()),
+                const SizedBox(height: 10),
+                _QuickAction(
+                  icon: Icons.history_rounded,
+                  label: 'Watch History',
+                  subtitle: '${stats.completed} completed videos',
+                  isDark: isDark,
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const WatchHistoryScreen()),
+                  ),
                 ),
-              ),
+              ],
               const SizedBox(height: 10),
               _QuickAction(
                 icon: Icons.settings_rounded,
