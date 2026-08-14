@@ -12,11 +12,14 @@
 ///   - biometric / Quick Login — uses local_auth to re-authenticate existing token
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:edushare/models/user_model.dart';
 import 'package:edushare/core/services/api_client.dart';
 import 'package:edushare/core/services/session_service.dart';
 import 'package:edushare/core/exceptions/app_exception.dart';
+import 'package:edushare/core/app_navigator.dart';
+import 'package:edushare/views/auth/login_screen.dart';
 
 class AuthService extends ChangeNotifier {
   final _api = ApiClient.instance;
@@ -433,10 +436,23 @@ class AuthService extends ChangeNotifier {
     }
   }
 
-  // ─── Sign out ──────────────────────────────────────────────────────────
+  // ─── Sign out ─────────────────────────────────────────────────
   Future<void> signOut() async {
     await _session.clearAll(); // clears token + user, keeps rememberMe + quickLogin prefs
     _currentUser = null;
     notifyListeners();
+    // Force-navigate to LoginScreen from anywhere in the app, regardless of
+    // how deeply nested the current route is (Settings, Dashboard, etc.).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      appNavigatorKey.currentState?.pushAndRemoveUntil(
+        PageRouteBuilder(
+          pageBuilder: (_, __, ___) => const LoginScreen(),
+          transitionDuration: const Duration(milliseconds: 350),
+          transitionsBuilder: (_, anim, __, child) =>
+              FadeTransition(opacity: anim, child: child),
+        ),
+        (route) => false,
+      );
+    });
   }
 }

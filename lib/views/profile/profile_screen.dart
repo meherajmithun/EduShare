@@ -24,9 +24,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   void initState() {
     super.initState();
-    // Ensure stats are loaded when profile opens
+    // Only load learning stats for students
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<UserStatsProvider>().refresh();
+      final user = context.read<AuthService>().currentUser;
+      if (user?.role == 'student') {
+        context.read<UserStatsProvider>().refresh();
+      }
     });
   }
 
@@ -306,18 +309,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ],
                 ),
               ),
-              const SizedBox(height: 24),
 
-              // ── Learning Statistics ─────────────────────────────────
-              Text(
-                'LEARNING STATISTICS',
-                style: TextStyle(
-                  color: isDark
-                      ? AppTheme.darkTextSecondary
-                      : AppTheme.lightTextSecondary,
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 1.2,
+              // ── Learning Statistics (Students only) ─────────────────
+              if (user.role == 'student') ...[
+                const SizedBox(height: 24),
+                Text(
+                  'LEARNING STATISTICS',
+                  style: TextStyle(
+                    color: isDark
+                        ? AppTheme.darkTextSecondary
+                        : AppTheme.lightTextSecondary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.2,
                 ),
               ),
               const SizedBox(height: 12),
@@ -501,8 +505,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                   ],
                 ),
-              ),
+              ), // weekly chart Container
               const SizedBox(height: 24),
+              ], // end if (user.role == 'student')
 
               // ── Quick Actions ────────────────────────────────────────
               Text(

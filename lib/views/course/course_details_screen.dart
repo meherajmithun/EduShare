@@ -46,129 +46,26 @@ class _CourseDetailsScreenState extends State<CourseDetailsScreen> with SingleTi
       final assignments = await _firestoreService.getApprovedMaterials(widget.course.id, type: 'assignment');
       final videos = await _firestoreService.getApprovedMaterials(widget.course.id, type: 'video');
 
-      final allNotes = [...notes, ...pdfs];
-
       if (mounted) {
         setState(() {
-          _notes = allNotes.isNotEmpty ? allNotes : _getMockNotes();
-          _assignments = assignments.isNotEmpty ? assignments : _getMockAssignments();
-          _videos = videos.isNotEmpty ? videos : _getMockVideos();
-          _pastPapers = _getMockPastPapers();
+          _notes = [...notes, ...pdfs];
+          _assignments = assignments;
+          _videos = videos;
+          _pastPapers = []; // loaded from backend only when a separate past-papers type is added
           _isLoading = false;
         });
       }
     } catch (e) {
       if (mounted) {
         setState(() {
-          _notes = _getMockNotes();
-          _assignments = _getMockAssignments();
-          _videos = _getMockVideos();
-          _pastPapers = _getMockPastPapers();
+          _notes = [];
+          _assignments = [];
+          _videos = [];
+          _pastPapers = [];
           _isLoading = false;
         });
       }
     }
-  }
-
-  List<MaterialModel> _getMockNotes() {
-    return [
-      MaterialModel(
-        id: 'c1',
-        title: 'Ch 1: ER Diagrams & Relational Model',
-        description: 'Comprehensive Database Fundamentals Notes',
-        departmentId: 'cse',
-        department: 'CSE',
-        courseId: widget.course.id,
-        type: 'pdf',
-        fileUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
-        uploadedBy: 'Dr. Alan Turing',
-        contributorName: 'Dr. Alan Turing',
-        views: 1420,
-        avgRating: 4.9,
-        totalRatings: 42,
-        createdAt: DateTime.now().subtract(const Duration(days: 2)),
-      ),
-      MaterialModel(
-        id: 'c2',
-        title: 'Ch 2: Advanced SQL Joins & Views',
-        description: 'Database Query Optimization & Views',
-        departmentId: 'cse',
-        department: 'CSE',
-        courseId: widget.course.id,
-        type: 'pdf',
-        fileUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
-        uploadedBy: 'Dr. Alan Turing',
-        contributorName: 'Dr. Alan Turing',
-        views: 1100,
-        avgRating: 4.8,
-        totalRatings: 30,
-        createdAt: DateTime.now().subtract(const Duration(days: 5)),
-      ),
-    ];
-  }
-
-  List<MaterialModel> _getMockAssignments() {
-    return [
-      MaterialModel(
-        id: 'a1',
-        title: 'Assignment 1: Relational Algebra & Calculus',
-        description: 'Practice problems & solutions',
-        departmentId: 'cse',
-        department: 'CSE',
-        courseId: widget.course.id,
-        type: 'assignment',
-        fileUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
-        uploadedBy: 'Dr. Alan Turing',
-        contributorName: 'Dr. Alan Turing',
-        views: 950,
-        avgRating: 4.7,
-        totalRatings: 25,
-        createdAt: DateTime.now().subtract(const Duration(days: 7)),
-      ),
-    ];
-  }
-
-  List<MaterialModel> _getMockVideos() {
-    return [
-      MaterialModel(
-        id: 'v1',
-        title: 'Ch 2: Relational Algebra & Calculus Video Lecture',
-        description: 'Complete video walkthrough with Dr. Alan Turing',
-        departmentId: 'cse',
-        department: 'CSE',
-        courseId: widget.course.id,
-        type: 'video',
-        videoLink: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-        videoSource: 'youtube',
-        uploadedBy: 'Dr. Alan Turing',
-        contributorName: 'Dr. Alan Turing',
-        views: 3400,
-        avgRating: 4.9,
-        totalRatings: 112,
-        createdAt: DateTime.now().subtract(const Duration(days: 3)),
-      ),
-    ];
-  }
-
-  List<MaterialModel> _getMockPastPapers() {
-    return [
-      MaterialModel(
-        id: 'p1',
-        title: 'Midterm Exam Past Paper 2024 with Solutions',
-        description: 'Database Systems Midterm',
-        departmentId: 'cse',
-        department: 'CSE',
-        courseId: widget.course.id,
-        type: 'pdf',
-        fileUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
-        uploadedBy: 'Dr. Alan Turing',
-        contributorName: 'Dr. Alan Turing',
-        views: 2100,
-        avgRating: 4.9,
-        totalRatings: 85,
-        createdAt: DateTime.now().subtract(const Duration(days: 12)),
-      ),
-    ];
   }
 
   void _launchMaterial(MaterialModel m) {
@@ -469,16 +366,24 @@ class _CourseDetailsScreenState extends State<CourseDetailsScreen> with SingleTi
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           ),
           onPressed: () {
-            final targetVideo = _videos.isNotEmpty ? _videos.first : _getMockVideos().first;
-            Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => VideoDetailsScreen(
-                  course: widget.course,
-                  allCourseVideos: _videos.isNotEmpty ? _videos : _getMockVideos(),
-                  initialVideo: targetVideo,
+            if (_videos.isNotEmpty) {
+              final targetVideo = _videos.first;
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => VideoDetailsScreen(
+                    course: widget.course,
+                    allCourseVideos: _videos,
+                    initialVideo: targetVideo,
+                  ),
                 ),
-              ),
-            );
+              );
+            } else if (_notes.isNotEmpty) {
+              _launchMaterial(_notes.first);
+            } else {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('No learning materials available for this course yet.')),
+              );
+            }
           },
           child: const Row(
             mainAxisAlignment: MainAxisAlignment.center,

@@ -83,7 +83,7 @@ class _ApprovalsScreenState extends State<ApprovalsScreen>
 
   Future<void> _previewMaterial(MaterialModel mat) async {
     if (mat.type == 'video' || mat.isCloudinaryVideo || mat.isYouTube) {
-      final dummyCourse = CourseModel(
+      final previewCourse = CourseModel(
         id: mat.courseId,
         code: mat.department,
         name: mat.title,
@@ -92,7 +92,7 @@ class _ApprovalsScreenState extends State<ApprovalsScreen>
       Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => VideoDetailsScreen(
-            course: dummyCourse,
+            course: previewCourse,
             allCourseVideos: [mat],
             initialVideo: mat,
           ),

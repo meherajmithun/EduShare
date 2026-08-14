@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:edushare/core/app_navigator.dart';
 import 'package:edushare/core/theme.dart';
 import 'package:edushare/core/providers/theme_provider.dart';
 import 'package:edushare/core/providers/user_stats_provider.dart';
@@ -28,8 +29,10 @@ void main() async {
   if (authService.currentUser != null) {
     // Refresh badge count on app startup if a session was restored
     notificationService.refreshUnreadCount();
-    // Refresh learning stats for the restored session user
-    userStatsProvider.refresh();
+    // Only refresh learning stats for students
+    if (authService.currentUser!.role == 'student') {
+      userStatsProvider.refresh();
+    }
   }
 
   runApp(
@@ -59,6 +62,7 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'EduShare',
       debugShowCheckedModeBanner: false,
+      navigatorKey: appNavigatorKey,
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
       themeMode: themeMode,

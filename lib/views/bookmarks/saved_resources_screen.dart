@@ -49,7 +49,7 @@ class _SavedResourcesScreenState extends State<SavedResourcesScreen> {
 
       if (mounted) {
         setState(() {
-          _allSavedMaterials = saved.isNotEmpty ? saved : _getMockSavedMaterials();
+          _allSavedMaterials = saved;
           _filteredMaterials = _allSavedMaterials;
           _isLoading = false;
         });
@@ -57,66 +57,12 @@ class _SavedResourcesScreenState extends State<SavedResourcesScreen> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _allSavedMaterials = _getMockSavedMaterials();
-          _filteredMaterials = _allSavedMaterials;
+          _allSavedMaterials = [];
+          _filteredMaterials = [];
           _isLoading = false;
         });
       }
     }
-  }
-
-  List<MaterialModel> _getMockSavedMaterials() {
-    return [
-      MaterialModel(
-        id: 'mock1',
-        title: 'B+ Trees & Indexing Cheatsheet',
-        description: 'Comprehensive Database Indexing Guide',
-        departmentId: 'cse',
-        department: 'CSE',
-        courseId: 'cs245',
-        type: 'pdf',
-        fileUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
-        uploadedBy: 'Prof. Alan Turing',
-        contributorName: 'Prof. Alan Turing',
-        views: 1200,
-        avgRating: 4.9,
-        totalRatings: 42,
-        createdAt: DateTime.now().subtract(const Duration(days: 2)),
-      ),
-      MaterialModel(
-        id: 'mock2',
-        title: 'Cache Coherence & Pipelining Demo',
-        description: 'Computer Architecture Video Lecture',
-        departmentId: 'cse',
-        department: 'CSE',
-        courseId: 'cs102',
-        type: 'video',
-        videoLink: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-        videoSource: 'youtube',
-        uploadedBy: 'Prof. Ada Lovelace',
-        contributorName: 'Prof. Ada Lovelace',
-        views: 3400,
-        avgRating: 4.8,
-        totalRatings: 88,
-        createdAt: DateTime.now().subtract(const Duration(days: 5)),
-      ),
-      MaterialModel(
-        id: 'mock3',
-        title: 'Linear Algebra Midterm Sample Sol.',
-        description: 'Mathematics Assignment Solutions',
-        departmentId: 'math',
-        department: 'MATH',
-        courseId: 'math101',
-        type: 'assignment',
-        fileUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
-        uploadedBy: 'Dr. John von Neumann',
-        contributorName: 'Dr. John von Neumann',
-        views: 890,
-        avgRating: 4.7,
-        totalRatings: 29,
-        createdAt: DateTime.now().subtract(const Duration(days: 10)),
-      ),
-    ];
   }
 
   void _filterResources(String query) {
