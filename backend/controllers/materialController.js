@@ -128,16 +128,24 @@ const createMaterial = async (req, res) => {
   }
 
   let effectiveVideoSource = videoSource;
+
   // Validate based on type / videoSource combination
   if (type === 'video') {
-    if (!effectiveVideoSource && req.file) {
+    if (videoLink && typeof videoLink === 'string' && videoLink.trim().length > 0) {
+      const trimmedUrl = videoLink.trim();
+      try {
+        const parsed = new URL(trimmedUrl);
+        if (!['http:', 'https:'].includes(parsed.protocol)) {
+          throw new Error('Invalid protocol');
+        }
+      } catch (_) {
+        throw createError('Please enter a valid video URL (e.g. https://www.youtube.com/watch?v=... or https://youtu.be/...).', 400);
+      }
+      effectiveVideoSource = 'youtube';
+    } else if (req.file) {
       effectiveVideoSource = 'cloudinary';
-    }
-    if (effectiveVideoSource === 'youtube' && !videoLink) {
-      throw createError('A YouTube URL is required when videoSource is "youtube".', 400);
-    }
-    if (effectiveVideoSource !== 'youtube' && !req.file) {
-      throw createError('A video file is required for video upload.', 400);
+    } else {
+      throw createError('A valid video URL or video file is required for video materials.', 400);
     }
   } else {
     // notes, assignment, pdf — all require a file
@@ -172,8 +180,8 @@ const createMaterial = async (req, res) => {
   const facultyAdmin = await findFacultyAdminForDept(departmentId);
 
   const materialData = {
-    title,
-    description,
+    title: title.trim(),
+    description: description.trim(),
     type,
     courseId,
     departmentId,
@@ -188,7 +196,7 @@ const createMaterial = async (req, res) => {
 
   // ── Handle file upload to Cloudinary ─────────────────────────────────
   if (req.file) {
-    if (type === 'video' && videoSource === 'cloudinary') {
+    if (type === 'video' && effectiveVideoSource === 'cloudinary') {
       // Upload as video resource type
       const { url, publicId } = await uploadVideoBuffer(req.file.buffer, 'edushare/videos');
       materialData.fileUrl = url;
@@ -206,9 +214,11 @@ const createMaterial = async (req, res) => {
     materialData.fileSize = req.file.size || null;
   }
 
-  // ── Handle YouTube link ───────────────────────────────────────────────
-  if (type === 'video' && videoSource === 'youtube') {
-    materialData.videoLink = videoLink.trim();
+  // ── Handle YouTube / Video URL ────────────────────────────────────────
+  if (type === 'video' && effectiveVideoSource === 'youtube') {
+    const trimmedUrl = videoLink.trim();
+    materialData.videoLink = trimmedUrl;
+    materialData.fileUrl = trimmedUrl; // Set fileUrl for backward-compatible fallback
     materialData.videoSource = 'youtube';
   }
 

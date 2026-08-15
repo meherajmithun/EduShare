@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:youtube_player_flutter/youtube_player_flutter.dart';
 import 'package:edushare/core/theme.dart';
 import 'package:edushare/core/services/auth_service.dart';
 import 'package:edushare/core/services/firestore_service.dart';
@@ -25,13 +26,17 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
   final _formKey = GlobalKey<FormState>();
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
+  final _videoUrlController = TextEditingController();
 
   final FirestoreService _firestoreService = FirestoreService();
 
   /// 'notes' | 'assignment' | 'video' | 'pdf'
   String _selectedType = 'notes';
 
-  /// For video type: 'gallery' | 'file' | null
+  /// For video: 'url' (YouTube / Web link) | 'file' (direct video upload)
+  String _videoUploadMode = 'url';
+
+  /// For video file source: 'gallery' | 'file' | null
   String? _videoSource;
 
   CourseModel? _selectedCourse;
@@ -54,6 +59,7 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
   void dispose() {
     _titleController.dispose();
     _descriptionController.dispose();
+    _videoUrlController.dispose();
     super.dispose();
   }
 
@@ -323,35 +329,62 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
       return;
     }
 
-    if (_selectedFile == null) {
-      if (_selectedType == 'video') {
-        _showError('Please select a video file to upload.');
-      } else if (_selectedType == 'pdf') {
-        _showError('Please select a PDF file to upload.');
-      } else {
-        _showError('Please select a document or image file to upload.');
-      }
-      return;
-    }
+    Uint8List? fileBytes;
+    String? effectiveVideoSource;
+    String? videoLink;
 
-    final fileBytes = await _getFileBytes(_selectedFile!);
-    if (fileBytes == null || fileBytes.isEmpty) {
-      _showError('Could not read the selected file data. Please try re-selecting it.');
-      return;
+    if (_selectedType == 'video') {
+      if (_videoUploadMode == 'url') {
+        final url = _videoUrlController.text.trim();
+        if (url.isEmpty) {
+          _showError('Please enter a YouTube or video URL.');
+          return;
+        }
+        final parsedUri = Uri.tryParse(url);
+        if (parsedUri == null || !parsedUri.hasScheme || (parsedUri.scheme != 'http' && parsedUri.scheme != 'https')) {
+          _showError('Please enter a valid HTTP or HTTPS video URL.');
+          return;
+        }
+        videoLink = url;
+        effectiveVideoSource = 'youtube';
+      } else {
+        if (_selectedFile == null) {
+          _showError('Please select a video file to upload.');
+          return;
+        }
+        fileBytes = await _getFileBytes(_selectedFile!);
+        if (fileBytes == null || fileBytes.isEmpty) {
+          _showError('Could not read the selected video file. Please try selecting it again.');
+          return;
+        }
+        effectiveVideoSource = 'cloudinary';
+      }
+    } else {
+      if (_selectedFile == null) {
+        if (_selectedType == 'pdf') {
+          _showError('Please select a PDF file to upload.');
+        } else {
+          _showError('Please select a document or image file to upload.');
+        }
+        return;
+      }
+      fileBytes = await _getFileBytes(_selectedFile!);
+      if (fileBytes == null || fileBytes.isEmpty) {
+        _showError('Could not read the selected file data. Please try re-selecting it.');
+        return;
+      }
     }
 
     setState(() => _isUploading = true);
 
     try {
-      final effectiveVideoSource = _selectedType == 'video' ? 'cloudinary' : null;
-
       final newMaterial = MaterialModel(
         id: '',
         title: _titleController.text.trim(),
         description: _descriptionController.text.trim(),
         type: _selectedType,
-        fileUrl: null,
-        videoLink: null,
+        fileUrl: videoLink,
+        videoLink: videoLink,
         videoSource: effectiveVideoSource,
         courseId: _selectedCourse?.id ?? '',
         departmentId: _selectedCourse?.departmentId ?? '',
@@ -382,7 +415,16 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
     } catch (e) {
       if (mounted) {
         setState(() => _isUploading = false);
-        _showError('Upload failed: ${e.toString()}');
+        final rawMsg = e.toString();
+        final cleanMsg = rawMsg
+            .replaceAll('Exception: ', '')
+            .replaceAll('ValidationException: ', '')
+            .replaceAll('ServerException: ', '')
+            .replaceAll('NetworkException: ', '')
+            .replaceAll('ForbiddenException: ', '')
+            .replaceAll('UnauthorizedException: ', '')
+            .replaceAll('NotFoundException: ', '');
+        _showError(cleanMsg.isNotEmpty ? cleanMsg : 'Upload failed. Please try again.');
       }
     }
   }
@@ -494,7 +536,7 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
                   hint: 'e.g. Lecture 5 Notes, Assignment 1 Solution, Chapter 3 Guide',
                   controller: _titleController,
                   validator: (val) {
-                    if (val == null || val.isEmpty) {
+                    if (val == null || val.trim().isEmpty) {
                       return 'Please enter a title';
                     }
                     return null;
@@ -509,7 +551,7 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
                   controller: _descriptionController,
                   maxLines: 3,
                   validator: (val) {
-                    if (val == null || val.isEmpty) {
+                    if (val == null || val.trim().isEmpty) {
                       return 'Please enter a description';
                     }
                     return null;
@@ -544,99 +586,228 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
   // ─── Video Upload Section ─────────────────────────────────────────────
 
   Widget _buildVideoUploadSection(ThemeData theme) {
+    final isDark = theme.brightness == Brightness.dark;
+    final ytId = YoutubePlayer.convertUrlToId(_videoUrlController.text.trim());
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          'VIDEO FILE',
-          style: theme.textTheme.bodyMedium?.copyWith(
-            fontWeight: FontWeight.w600,
-            color: theme.brightness == Brightness.dark
-                ? AppTheme.darkTextSecondary
-                : AppTheme.lightTextSecondary,
-          ),
-        ),
-        const SizedBox(height: 8),
-
-        // Choose Source Button / Selected State
-        GestureDetector(
-          onTap: _showVideoSourcePicker,
-          child: Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: theme.cardColor,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: _selectedFile != null ? AppTheme.primaryColor : theme.dividerColor,
-                width: 1.5,
-              ),
-            ),
-            child: _selectedFile == null
-                ? Row(
+        // Mode Selector: URL vs File Upload
+        Row(
+          children: [
+            Expanded(
+              child: GestureDetector(
+                onTap: () => setState(() => _videoUploadMode = 'url'),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  decoration: BoxDecoration(
+                    color: _videoUploadMode == 'url'
+                        ? AppTheme.primaryColor.withOpacity(0.15)
+                        : (isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9)),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: _videoUploadMode == 'url' ? AppTheme.primaryColor : Colors.transparent,
+                      width: 1.5,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.video_call_rounded, color: theme.disabledColor, size: 28),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Choose Video File',
-                              style: theme.textTheme.titleMedium?.copyWith(
-                                fontSize: 14,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              'From Gallery or File Explorer / Google Drive',
-                              style: theme.textTheme.bodyMedium?.copyWith(fontSize: 12),
-                            ),
-                          ],
+                      Icon(
+                        Icons.link_rounded,
+                        size: 18,
+                        color: _videoUploadMode == 'url' ? AppTheme.primaryColor : theme.disabledColor,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        'YouTube / Video URL',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: _videoUploadMode == 'url' ? AppTheme.primaryColor : theme.textTheme.bodyMedium?.color,
                         ),
-                      ),
-                      Icon(Icons.chevron_right_rounded, color: theme.disabledColor),
-                    ],
-                  )
-                : Row(
-                    children: [
-                      const Icon(
-                        Icons.video_file_rounded,
-                        color: AppTheme.primaryColor,
-                        size: 28,
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              _selectedFile?.name ?? 'Video Selected',
-                              style: theme.textTheme.titleMedium?.copyWith(
-                                fontSize: 14,
-                                fontWeight: FontWeight.bold,
-                                color: AppTheme.primaryColor,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            Text(
-                              '${(_selectedFile!.size / 1024 / 1024).toStringAsFixed(2)} MB • ${_videoSource == 'gallery' ? 'Gallery' : 'Drive / Storage'}',
-                              style: theme.textTheme.bodyMedium?.copyWith(fontSize: 12),
-                            ),
-                          ],
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.swap_horiz_rounded),
-                        color: AppTheme.primaryColor,
-                        tooltip: 'Change video',
-                        onPressed: _showVideoSourcePicker,
                       ),
                     ],
                   ),
-          ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: GestureDetector(
+                onTap: () => setState(() => _videoUploadMode = 'file'),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  decoration: BoxDecoration(
+                    color: _videoUploadMode == 'file'
+                        ? AppTheme.primaryColor.withOpacity(0.15)
+                        : (isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9)),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: _videoUploadMode == 'file' ? AppTheme.primaryColor : Colors.transparent,
+                      width: 1.5,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.upload_file_rounded,
+                        size: 18,
+                        color: _videoUploadMode == 'file' ? AppTheme.primaryColor : theme.disabledColor,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Upload Video File',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: _videoUploadMode == 'file' ? AppTheme.primaryColor : theme.textTheme.bodyMedium?.color,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
+        const SizedBox(height: 16),
+
+        if (_videoUploadMode == 'url') ...[
+          CustomTextField(
+            label: 'YOUTUBE OR VIDEO URL',
+            hint: 'https://www.youtube.com/watch?v=... or https://youtu.be/...',
+            controller: _videoUrlController,
+            onChanged: (_) => setState(() {}),
+            validator: (val) {
+              if (_selectedType == 'video' && _videoUploadMode == 'url') {
+                if (val == null || val.trim().isEmpty) {
+                  return 'Please enter a video URL';
+                }
+                final uri = Uri.tryParse(val.trim());
+                if (uri == null || !uri.hasScheme || (!uri.scheme.startsWith('http'))) {
+                  return 'Please enter a valid URL (starting with http:// or https://)';
+                }
+              }
+              return null;
+            },
+          ),
+          if (ytId != null && ytId.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF10B981).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFF10B981).withOpacity(0.4)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.check_circle_rounded, color: Color(0xFF10B981), size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Valid YouTube Video detected (ID: $ytId)',
+                      style: const TextStyle(
+                        color: Color(0xFF10B981),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ] else ...[
+          Text(
+            'VIDEO FILE',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w600,
+              color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+            ),
+          ),
+          const SizedBox(height: 8),
+          GestureDetector(
+            onTap: _showVideoSourcePicker,
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: theme.cardColor,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: _selectedFile != null ? AppTheme.primaryColor : theme.dividerColor,
+                  width: 1.5,
+                ),
+              ),
+              child: _selectedFile == null
+                  ? Row(
+                      children: [
+                        Icon(Icons.video_call_rounded, color: theme.disabledColor, size: 28),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Choose Video File',
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                'From Gallery or File Explorer / Google Drive',
+                                style: theme.textTheme.bodyMedium?.copyWith(fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Icon(Icons.chevron_right_rounded, color: theme.disabledColor),
+                      ],
+                    )
+                  : Row(
+                      children: [
+                        const Icon(
+                          Icons.video_file_rounded,
+                          color: AppTheme.primaryColor,
+                          size: 28,
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _selectedFile?.name ?? 'Video Selected',
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppTheme.primaryColor,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              Text(
+                                '${(_selectedFile!.size / 1024 / 1024).toStringAsFixed(2)} MB • ${_videoSource == 'gallery' ? 'Gallery' : 'Drive / Storage'}',
+                                style: theme.textTheme.bodyMedium?.copyWith(fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.swap_horiz_rounded),
+                          color: AppTheme.primaryColor,
+                          tooltip: 'Change video',
+                          onPressed: _showVideoSourcePicker,
+                        ),
+                      ],
+                    ),
+            ),
+          ),
+        ],
       ],
     );
   }

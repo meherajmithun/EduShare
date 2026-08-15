@@ -29,6 +29,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final FirestoreService _firestoreService = FirestoreService();
+  final ScrollController _scrollController = ScrollController();
   List<DepartmentModel> _departments = [];
   List<CourseModel> _allCourses = [];
   List<CourseModel> _filteredCourses = [];
@@ -46,6 +47,24 @@ class _HomeScreenState extends State<HomeScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<UserStatsProvider>().refresh();
     });
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onDashboardHeaderTap() {
+    if (_scrollController.hasClients) {
+      _scrollController.animateTo(
+        0.0,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    }
+    _loadData();
+    context.read<UserStatsProvider>().refresh(force: true);
   }
 
   Future<void> _loadData() async {
@@ -234,51 +253,62 @@ class _HomeScreenState extends State<HomeScreen> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         leadingWidth: 160,
-        leading: const Padding(
-          padding: EdgeInsets.only(left: 16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                'PORTAL MODE',
-                style: TextStyle(
-                  color: AppTheme.darkTextSecondary,
-                  fontSize: 9,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 1.2,
-                ),
-              ),
-              SizedBox(height: 2),
-              Text(
-                'EduShare',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          Container(
-            margin: const EdgeInsets.only(right: 12),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(
-              color: AppTheme.primaryColor.withOpacity(0.2),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: AppTheme.primaryColor.withOpacity(0.5)),
-            ),
-            child: Row(
+        leading: GestureDetector(
+          onTap: _onDashboardHeaderTap,
+          behavior: HitTestBehavior.opaque,
+          child: Padding(
+            padding: const EdgeInsets.only(left: 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.circle, color: AppTheme.primaryColor, size: 8),
-                const SizedBox(width: 6),
-                Text(
-                  '$roleBadge DASHBOARD',
-                  style: const TextStyle(
-                    color: AppTheme.primaryColor,
-                    fontSize: 10,
+                const Text(
+                  'PORTAL MODE',
+                  style: TextStyle(
+                    color: AppTheme.darkTextSecondary,
+                    fontSize: 9,
                     fontWeight: FontWeight.bold,
+                    letterSpacing: 1.2,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'EduShare',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : AppTheme.lightTextPrimary,
                   ),
                 ),
               ],
+            ),
+          ),
+        ),
+        actions: [
+          GestureDetector(
+            onTap: _onDashboardHeaderTap,
+            child: Container(
+              margin: const EdgeInsets.only(right: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: AppTheme.primaryColor.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: AppTheme.primaryColor.withOpacity(0.5)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.circle, color: AppTheme.primaryColor, size: 8),
+                  const SizedBox(width: 6),
+                  Text(
+                    '$roleBadge DASHBOARD',
+                    style: const TextStyle(
+                      color: AppTheme.primaryColor,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ],
@@ -292,6 +322,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 if (mounted) context.read<UserStatsProvider>().refresh(force: true);
               },
               child: SingleChildScrollView(
+                controller: _scrollController,
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                 child: Column(
