@@ -22,6 +22,7 @@
 
 const Material = require('../models/Material');
 const MaterialRating = require('../models/MaterialRating');
+const PdfProgress = require('../models/PdfProgress');
 const User = require('../models/User');
 const Department = require('../models/Department');
 const Course = require('../models/Course');
@@ -198,13 +199,13 @@ const createMaterial = async (req, res) => {
   if (req.file) {
     if (type === 'video' && effectiveVideoSource === 'cloudinary') {
       // Upload as video resource type
-      const { url, publicId } = await uploadVideoBuffer(req.file.buffer, 'edushare/videos');
+      const { url, publicId } = await uploadVideoBuffer(req.file.buffer, 'edushare/videos', req.file.originalname);
       materialData.fileUrl = url;
       materialData.filePublicId = publicId;
       materialData.videoSource = 'cloudinary';
     } else {
-      // Upload as raw resource type (PDF, DOC, images)
-      const { url, publicId } = await uploadBuffer(req.file.buffer, 'edushare/materials');
+      // Upload as image or raw document (PDF, DOC, images)
+      const { url, publicId } = await uploadBuffer(req.file.buffer, 'edushare/materials', req.file.originalname);
       materialData.fileUrl = url;
       materialData.filePublicId = publicId;
     }
@@ -248,132 +249,101 @@ const deleteMaterial = async (req, res) => {
 
   if (material.filePublicId) {
     // Determine the correct resource_type for Cloudinary deletion
-    let resourceType = 'raw'; // default for PDF/doc
-    if (material.type === 'video' && material.videoSource === 'cloudinary') {
-      resourceType = 'video';
-    } else if (['notes', 'assignment', 'pdf'].includes(material.type)) {
-      resourceType = 'raw';
+    let resType = 'raw';
+    if (material.type === 'video') resType = 'video';
+    else if (['.jpg', '.jpeg', '.png', '.webp', '.gif'].some(ext => (material.fileUrl || '').toLowerCase().endsWith(ext))) {
+      resType = 'image';
     }
-    await deleteFile(material.filePublicId, resourceType);
+    await deleteFile(material.filePublicId, resType);
   }
 
-  // Also remove all ratings for this material
-  await MaterialRating.deleteMany({ materialId: req.params.id });
-  await Material.findByIdAndDelete(req.params.id);
-
+  await material.deleteOne();
   res.json(success(null, 'Material deleted successfully.'));
 };
 
 // ─── GET /api/materials/:id/ratings ───────────────────────────────────
-// Returns all ratings for a material + the caller's own rating.
 const getMaterialRatings = async (req, res) => {
-  const material = await Material.findById(req.params.id).select('_id title uploadedBy');
-  if (!material) throw createError('Material not found.', 404);
+  const { id } = req.params;
+  const ratings = await MaterialRating.find({ materialId: id }).sort({ createdAt: -1 });
 
-  const ratings = await MaterialRating.find({ materialId: req.params.id })
-    .sort({ createdAt: -1 });
+  let myRating = null;
+  if (req.user) {
+    myRating = ratings.find(r => r.userId.toString() === req.user._id.toString()) || null;
+  }
 
-  const myRating = ratings.find(
-    (r) => r.ratedBy.toString() === req.user._id.toString()
-  ) ?? null;
-
-  res.json(success({ ratings, myRating, avgRating: material.avgRating, totalRatings: material.totalRatings }, 'Ratings fetched.'));
+  res.json(success({ ratings, myRating }, 'Ratings fetched successfully.'));
 };
 
 // ─── POST /api/materials/:id/ratings ──────────────────────────────────
-// Submit a new material rating. Only students allowed. One per material.
 const addMaterialRating = async (req, res) => {
-  if (req.user.role !== 'student') {
-    throw createError('Only students can rate materials.', 403);
-  }
-
+  const { id } = req.params;
   const { stars, review } = req.body;
-  if (!stars) throw createError('stars (1–5) is required.', 400);
-  const starsInt = parseInt(stars, 10);
-  if (isNaN(starsInt) || starsInt < 1 || starsInt > 5) {
+
+  if (!stars || stars < 1 || stars > 5) {
     throw createError('stars must be an integer between 1 and 5.', 400);
   }
 
-  const material = await Material.findById(req.params.id);
+  const material = await Material.findById(id);
   if (!material) throw createError('Material not found.', 404);
-  if (material.approvalStatus !== 'approved') {
+  if (material.approvalStatus !== 'approved' && material.status !== 'approved') {
     throw createError('You can only rate approved materials.', 400);
   }
 
-  // Prevent duplicate rating
-  const existing = await MaterialRating.findOne({
-    materialId: req.params.id,
-    ratedBy: req.user._id,
-  });
+  const existing = await MaterialRating.findOne({ materialId: id, userId: req.user._id });
   if (existing) {
-    throw createError('You have already rated this material. Use PUT to update.', 409);
+    throw createError('You have already rated this material. Use PUT to update your review.', 409);
   }
 
   const rating = await MaterialRating.create({
-    materialId: material._id,
-    contributorId: material.uploadedBy,
-    ratedBy: req.user._id,
+    materialId: id,
+    userId: req.user._id,
     ratedByName: req.user.name,
-    stars: starsInt,
-    review: review?.trim() ?? '',
+    contributorId: material.uploadedBy,
+    stars: Math.round(stars),
+    review: (review || '').trim(),
   });
 
-  await recalcMaterialRating(material._id, material.uploadedBy);
+  const { matAvg, matCount } = await recalcMaterialRating(id, material.uploadedBy);
+  notifyContributorOnRatingSubmitted({ rating, material, reviewer: req.user });
 
-  // Notify contributor (fire-and-forget)
-  notifyContributorOnRatingSubmitted({ material, student: req.user });
-
-  res.status(201).json(success(rating, 'Rating submitted successfully.'));
+  res.status(201).json(success({ rating, avgRating: matAvg, totalRatings: matCount }, 'Rating submitted successfully.'));
 };
 
 // ─── PUT /api/materials/:id/ratings ───────────────────────────────────
-// Update the caller's existing rating.
 const updateMaterialRating = async (req, res) => {
-  if (req.user.role !== 'student') {
-    throw createError('Only students can rate materials.', 403);
-  }
-
+  const { id } = req.params;
   const { stars, review } = req.body;
-  const rating = await MaterialRating.findOne({
-    materialId: req.params.id,
-    ratedBy: req.user._id,
-  });
-  if (!rating) throw createError('No rating found. Use POST to submit a new rating.', 404);
 
-  if (stars !== undefined) {
-    const starsInt = parseInt(stars, 10);
-    if (isNaN(starsInt) || starsInt < 1 || starsInt > 5) {
-      throw createError('stars must be an integer between 1 and 5.', 400);
-    }
-    rating.stars = starsInt;
+  if (!stars || stars < 1 || stars > 5) {
+    throw createError('stars must be an integer between 1 and 5.', 400);
   }
+
+  const rating = await MaterialRating.findOne({ materialId: id, userId: req.user._id });
+  if (!rating) throw createError('Rating not found. Submit a review first.', 404);
+
+  rating.stars = Math.round(stars);
   if (review !== undefined) rating.review = review.trim();
-
   await rating.save();
-  await recalcMaterialRating(rating.materialId, rating.contributorId);
 
-  const material = await Material.findById(req.params.id).select('title uploadedBy');
-  if (material) notifyContributorOnRatingUpdated({ material, student: req.user });
+  const material = await Material.findById(id);
+  const { matAvg, matCount } = await recalcMaterialRating(id, material ? material.uploadedBy : null);
+  if (material) {
+    notifyContributorOnRatingUpdated({ rating, material, reviewer: req.user });
+  }
 
-  res.json(success(rating, 'Rating updated successfully.'));
+  res.json(success({ rating, avgRating: matAvg, totalRatings: matCount }, 'Rating updated successfully.'));
 };
 
 // ─── DELETE /api/materials/:id/ratings ────────────────────────────────
-// Delete the caller's own rating.
 const deleteMaterialRating = async (req, res) => {
-  if (req.user.role !== 'student') {
-    throw createError('Only students can delete their material ratings.', 403);
-  }
+  const { id } = req.params;
+  const rating = await MaterialRating.findOneAndDelete({ materialId: id, userId: req.user._id });
+  if (!rating) throw createError('Rating not found.', 404);
 
-  const rating = await MaterialRating.findOneAndDelete({
-    materialId: req.params.id,
-    ratedBy: req.user._id,
-  });
-  if (!rating) throw createError('No rating found to delete.', 404);
+  const material = await Material.findById(id);
+  const { matAvg, matCount } = await recalcMaterialRating(id, material ? material.uploadedBy : null);
 
-  await recalcMaterialRating(rating.materialId, rating.contributorId);
-
-  res.json(success(null, 'Rating deleted successfully.'));
+  res.json(success({ avgRating: matAvg, totalRatings: matCount }, 'Rating deleted successfully.'));
 };
 
 // ─── POST /api/materials/:id/view ─────────────────────────────────────
@@ -398,6 +368,46 @@ const incrementMaterialDownload = async (req, res) => {
   );
   if (!material) throw createError('Material not found', 404);
   res.json(success({ downloads: material.downloads }, 'Material download recorded.'));
+};
+
+// ─── POST /api/materials/:id/progress ──────────────────────────────────
+// Save student's PDF reading progress
+const saveMaterialProgress = async (req, res) => {
+  const materialId = req.params.id;
+  const userId = req.user._id;
+  const { currentPage, totalPages, progressPercentage, courseId } = req.body;
+
+  const curPage = Math.max(1, parseInt(currentPage) || 1);
+  const totPages = Math.max(1, parseInt(totalPages) || 1);
+  const progPct = progressPercentage !== undefined
+    ? parseFloat(progressPercentage)
+    : Math.min(100, parseFloat(((curPage / totPages) * 100).toFixed(1)));
+
+  const progress = await PdfProgress.findOneAndUpdate(
+    { userId, materialId },
+    {
+      userId,
+      materialId,
+      courseId: courseId || undefined,
+      currentPage: curPage,
+      totalPages: totPages,
+      progressPercentage: progPct,
+      lastReadAt: new Date(),
+    },
+    { upsert: true, new: true }
+  );
+
+  res.json(success(progress, 'Reading progress saved.'));
+};
+
+// ─── GET /api/materials/:id/progress ───────────────────────────────────
+// Get student's saved PDF reading progress
+const getMaterialProgress = async (req, res) => {
+  const materialId = req.params.id;
+  const userId = req.user._id;
+
+  const progress = await PdfProgress.findOne({ userId, materialId });
+  res.json(success(progress || { currentPage: 1, totalPages: 1, progressPercentage: 0 }));
 };
 
 module.exports = {

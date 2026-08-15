@@ -27,6 +27,7 @@ import 'package:edushare/models/rating_model.dart';
 import 'package:edushare/models/user_model.dart';
 import 'package:edushare/views/course/video_details_screen.dart';
 import 'package:edushare/widgets/pdf_viewer_screen.dart';
+import 'package:edushare/widgets/image_viewer_screen.dart';
 
 class ContributorProfileScreen extends StatefulWidget {
   final String contributorId;
@@ -334,20 +335,33 @@ class _ContributorProfileScreenState extends State<ContributorProfileScreen>
           ),
         ));
       }
-    } else if (m.isPdf && m.fileUrl != null && m.fileUrl!.isNotEmpty) {
-      if (mounted) {
-        Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => PdfViewerScreen(
-            url: m.fileUrl!,
-            title: m.title,
-            materialId: m.id,
-          ),
-        ));
-      }
     } else if (m.fileUrl != null && m.fileUrl!.isNotEmpty) {
-      final uri = Uri.parse(m.fileUrl!);
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (mounted) {
+        if (m.isImage) {
+          Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => ImageViewerScreen(
+              url: m.fileUrl!,
+              title: m.title,
+              materialId: m.id,
+              courseName: m.department,
+              contributorName: m.contributorName,
+              createdAt: m.createdAt,
+              courseId: m.courseId,
+            ),
+          ));
+        } else {
+          Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => PdfViewerScreen(
+              url: m.fileUrl!,
+              title: m.title,
+              materialId: m.id,
+              courseName: m.department,
+              contributorName: m.contributorName,
+              createdAt: m.createdAt,
+              courseId: m.courseId,
+            ),
+          ));
+        }
       }
     }
   }

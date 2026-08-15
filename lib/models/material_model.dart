@@ -120,6 +120,21 @@ class MaterialModel {
       type == 'pdf' ||
       (fileUrl != null && fileUrl!.toLowerCase().contains('.pdf'));
 
+  /// True if this material is an image file (in-app Image viewer).
+  bool get isImage {
+    if (fileUrl != null && fileUrl!.isNotEmpty) {
+      final lower = fileUrl!.toLowerCase();
+      return lower.endsWith('.jpg') ||
+          lower.endsWith('.jpeg') ||
+          lower.endsWith('.png') ||
+          lower.endsWith('.webp') ||
+          lower.endsWith('.gif') ||
+          lower.endsWith('.bmp') ||
+          lower.contains('/image/upload/');
+    }
+    return false;
+  }
+
   /// Playback URL for this video (null if not a valid video material).
   String? get videoPlaybackUrl {
     if (isYouTube) return videoLink;

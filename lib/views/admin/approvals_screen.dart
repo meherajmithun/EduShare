@@ -12,6 +12,7 @@ import 'package:edushare/widgets/glass_card.dart';
 import 'package:edushare/widgets/notification_bell.dart';
 import 'package:edushare/widgets/app_bar_profile_avatar.dart';
 import 'package:edushare/widgets/pdf_viewer_screen.dart';
+import 'package:edushare/widgets/image_viewer_screen.dart';
 import 'package:edushare/views/course/video_details_screen.dart';
 
 /// Approval screen for admin-class roles with tabs:
@@ -101,17 +102,38 @@ class _ApprovalsScreenState extends State<ApprovalsScreen>
       return;
     }
 
-    if (mat.isPdf && mat.fileUrl != null && mat.fileUrl!.isNotEmpty) {
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => PdfViewerScreen(
-            url: mat.fileUrl!,
-            title: mat.title,
-            materialId: mat.id,
+    if (mat.fileUrl != null && mat.fileUrl!.isNotEmpty) {
+      if (mat.isImage) {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => ImageViewerScreen(
+              url: mat.fileUrl!,
+              title: mat.title,
+              materialId: mat.id,
+              courseName: mat.department,
+              contributorName: mat.contributorName,
+              createdAt: mat.createdAt,
+              courseId: mat.courseId,
+            ),
           ),
-        ),
-      );
-      return;
+        );
+        return;
+      } else {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => PdfViewerScreen(
+              url: mat.fileUrl!,
+              title: mat.title,
+              materialId: mat.id,
+              courseName: mat.department,
+              contributorName: mat.contributorName,
+              createdAt: mat.createdAt,
+              courseId: mat.courseId,
+            ),
+          ),
+        );
+        return;
+      }
     }
 
     final urlStr = mat.fileUrl ?? mat.videoLink;

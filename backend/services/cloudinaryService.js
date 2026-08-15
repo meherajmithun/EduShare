@@ -131,16 +131,33 @@ const upload = uploadMaterialFile;
 const smartUpload = uploadMaterialFile;
 
 /**
- * Stream a Buffer to Cloudinary as an auto resource (PDFs, docs, images).
+ * Stream a Buffer to Cloudinary as an optimal resource (image for images, raw for PDFs/DOCs, auto otherwise).
  * @param {Buffer} buffer
  * @param {string} [folder]
- * @param {string} [publicId]  Optional custom public_id
+ * @param {string} [originalName]  Original filename (e.g. 'lecture1.pdf')
  * @returns {Promise<{url: string, publicId: string}>}
  */
-const uploadBuffer = (buffer, folder = 'edushare/materials', publicId) => {
+const uploadBuffer = (buffer, folder = 'edushare/materials', originalName) => {
   return new Promise((resolve, reject) => {
-    const opts = { folder, resource_type: 'auto' };
-    if (publicId) opts.public_id = publicId;
+    const ext = originalName ? path.extname(originalName).toLowerCase() : '';
+    const isImage = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.svg'].includes(ext);
+    const isPdf = ext === '.pdf';
+
+    // Use 'image' for images so Cloudinary processes transformations;
+    // Use 'raw' or 'auto' for PDFs and documents to preserve the exact file binary.
+    const resourceType = isImage ? 'image' : (isPdf ? 'raw' : 'auto');
+
+    const opts = {
+      folder,
+      resource_type: resourceType,
+      use_filename: true,
+      unique_filename: true,
+    };
+
+    if (originalName) {
+      const sanitizedBase = path.basename(originalName, ext).replace(/[^a-zA-Z0-9_-]/g, '_');
+      opts.public_id = `${sanitizedBase}_${Date.now()}${ext}`;
+    }
 
     const uploadStream = cloudinary.uploader.upload_stream(opts, (error, result) => {
       if (error) return reject(error);
@@ -155,13 +172,23 @@ const uploadBuffer = (buffer, folder = 'edushare/materials', publicId) => {
  * Stream a Buffer to Cloudinary as a video resource.
  * @param {Buffer} buffer
  * @param {string} [folder]
- * @param {string} [publicId]  Optional custom public_id
+ * @param {string} [originalName]
  * @returns {Promise<{url: string, publicId: string}>}
  */
-const uploadVideoBuffer = (buffer, folder = 'edushare/videos', publicId) => {
+const uploadVideoBuffer = (buffer, folder = 'edushare/videos', originalName) => {
   return new Promise((resolve, reject) => {
-    const opts = { folder, resource_type: 'video' };
-    if (publicId) opts.public_id = publicId;
+    const ext = originalName ? path.extname(originalName).toLowerCase() : '';
+    const opts = {
+      folder,
+      resource_type: 'video',
+      use_filename: true,
+      unique_filename: true,
+    };
+
+    if (originalName) {
+      const sanitizedBase = path.basename(originalName, ext).replace(/[^a-zA-Z0-9_-]/g, '_');
+      opts.public_id = `${sanitizedBase}_${Date.now()}${ext || '.mp4'}`;
+    }
 
     const uploadStream = cloudinary.uploader.upload_stream(opts, (error, result) => {
       if (error) return reject(error);

@@ -271,6 +271,35 @@ class FirestoreService {
     await _api.delete('/api/materials/$materialId');
   }
 
+  /// Save PDF reading progress
+  Future<void> savePdfProgress(
+    String materialId, {
+    required int currentPage,
+    required int totalPages,
+    required double progressPercentage,
+    String? courseId,
+  }) async {
+    try {
+      await _api.post('/api/materials/$materialId/progress', {
+        'currentPage': currentPage,
+        'totalPages': totalPages,
+        'progressPercentage': progressPercentage,
+        if (courseId != null) 'courseId': courseId,
+      });
+    } catch (_) {}
+  }
+
+  /// Get saved PDF reading progress
+  Future<Map<String, dynamic>> getPdfProgress(String materialId) async {
+    try {
+      final res = await _api.get('/api/materials/$materialId/progress');
+      if (res is Map<String, dynamic>) return res;
+      return {};
+    } catch (_) {
+      return {};
+    }
+  }
+
   /// Approve or reject a material.
   /// [reason] is required when status = 'rejected'.
   /// [reviewComment] is optional admin feedback visible to the contributor.

@@ -7,6 +7,7 @@ import 'package:edushare/models/material_model.dart';
 import 'package:edushare/models/course_model.dart';
 import 'package:edushare/views/course/video_details_screen.dart';
 import 'package:edushare/widgets/pdf_viewer_screen.dart';
+import 'package:edushare/widgets/image_viewer_screen.dart';
 
 /// saved_resources_screen.dart — Figma-matched Library / Saved Resources Screen (node-id=81-3340)
 class SavedResourcesScreen extends StatefulWidget {
@@ -167,15 +168,35 @@ class _SavedResourcesScreenState extends State<SavedResourcesScreen> {
         ),
       ).then((_) => _loadSavedResources());
     } else if (m.fileUrl != null && m.fileUrl!.isNotEmpty) {
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => PdfViewerScreen(
-            url: m.fileUrl!,
-            title: m.title,
-            materialId: m.id,
+      if (m.isImage) {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => ImageViewerScreen(
+              url: m.fileUrl!,
+              title: m.title,
+              materialId: m.id,
+              courseName: m.department,
+              contributorName: m.contributorName,
+              createdAt: m.createdAt,
+              courseId: m.courseId,
+            ),
           ),
-        ),
-      );
+        );
+      } else {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => PdfViewerScreen(
+              url: m.fileUrl!,
+              title: m.title,
+              materialId: m.id,
+              courseName: m.department,
+              contributorName: m.contributorName,
+              createdAt: m.createdAt,
+              courseId: m.courseId,
+            ),
+          ),
+        );
+      }
     }
   }
 

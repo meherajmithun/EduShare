@@ -12,6 +12,8 @@ const {
   deleteMaterialRating,
   incrementMaterialView,
   incrementMaterialDownload,
+  saveMaterialProgress,
+  getMaterialProgress,
 } = require('../controllers/materialController');
 const { protect } = require('../middleware/auth');
 const roleGuard = require('../middleware/roleGuard');
@@ -30,6 +32,10 @@ router.get(
 );
 router.get('/', protect, getMaterials);          // ?courseId=&type=
 router.get('/:id', protect, getMaterialById);
+
+// ─── Reading & Material Progress ────────────────────────────────────────
+router.post('/:id/progress', protect, saveMaterialProgress);
+router.get('/:id/progress', protect, getMaterialProgress);
 
 // ─── View & Download counters ────────────────────────────────────────────
 router.post('/:id/view', protect, incrementMaterialView);

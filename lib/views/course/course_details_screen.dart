@@ -5,6 +5,7 @@ import 'package:edushare/models/course_model.dart';
 import 'package:edushare/models/material_model.dart';
 import 'package:edushare/views/course/video_details_screen.dart';
 import 'package:edushare/widgets/pdf_viewer_screen.dart';
+import 'package:edushare/widgets/image_viewer_screen.dart';
 
 /// course_details_screen.dart — Figma-matched Course Overview Screen (node-id=79-1477)
 class CourseDetailsScreen extends StatefulWidget {
@@ -88,15 +89,35 @@ class _CourseDetailsScreenState extends State<CourseDetailsScreen> with SingleTi
         ),
       );
     } else if (m.fileUrl != null && m.fileUrl!.isNotEmpty) {
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => PdfViewerScreen(
-            url: m.fileUrl!,
-            title: m.title,
-            materialId: m.id,
+      if (m.isImage) {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => ImageViewerScreen(
+              url: m.fileUrl!,
+              title: m.title,
+              materialId: m.id,
+              courseName: widget.course.name,
+              contributorName: m.contributorName,
+              createdAt: m.createdAt,
+              courseId: widget.course.id,
+            ),
           ),
-        ),
-      );
+        );
+      } else {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => PdfViewerScreen(
+              url: m.fileUrl!,
+              title: m.title,
+              materialId: m.id,
+              courseName: widget.course.name,
+              contributorName: m.contributorName,
+              createdAt: m.createdAt,
+              courseId: widget.course.id,
+            ),
+          ),
+        );
+      }
     }
   }
 

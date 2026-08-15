@@ -18,6 +18,7 @@ import 'package:edushare/views/course/completed_courses_screen.dart';
 import 'package:edushare/views/home/search_screen.dart';
 import 'package:edushare/views/bookmarks/saved_resources_screen.dart';
 import 'package:edushare/widgets/pdf_viewer_screen.dart';
+import 'package:edushare/widgets/image_viewer_screen.dart';
 
 /// home_screen.dart — Figma-matched Student Dashboard / Home Screen (node-id=71-293)
 class HomeScreen extends StatefulWidget {
@@ -206,15 +207,35 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
     } else if (m.fileUrl != null && m.fileUrl!.isNotEmpty) {
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => PdfViewerScreen(
-            url: m.fileUrl!,
-            title: m.title,
-            materialId: m.id,
+      if (m.isImage) {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => ImageViewerScreen(
+              url: m.fileUrl!,
+              title: m.title,
+              materialId: m.id,
+              courseName: m.department,
+              contributorName: m.contributorName,
+              createdAt: m.createdAt,
+              courseId: m.courseId,
+            ),
           ),
-        ),
-      );
+        );
+      } else {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => PdfViewerScreen(
+              url: m.fileUrl!,
+              title: m.title,
+              materialId: m.id,
+              courseName: m.department,
+              contributorName: m.contributorName,
+              createdAt: m.createdAt,
+              courseId: m.courseId,
+            ),
+          ),
+        );
+      }
     }
   }
 

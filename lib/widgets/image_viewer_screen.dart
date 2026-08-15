@@ -1,7 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_pdfview/flutter_pdfview.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -9,8 +8,8 @@ import 'package:edushare/core/theme.dart';
 import 'package:edushare/core/services/firestore_service.dart';
 import 'package:intl/intl.dart';
 
-/// In-app PDF viewer matching the Video Player dark sleek visual style.
-class PdfViewerScreen extends StatefulWidget {
+/// In-app interactive image viewer matching the Video Player dark sleek visual style.
+class ImageViewerScreen extends StatefulWidget {
   final String url;
   final String title;
   final String? materialId;
@@ -20,7 +19,7 @@ class PdfViewerScreen extends StatefulWidget {
   final DateTime? createdAt;
   final String? courseId;
 
-  const PdfViewerScreen({
+  const ImageViewerScreen({
     Key? key,
     required this.url,
     required this.title,
@@ -33,21 +32,14 @@ class PdfViewerScreen extends StatefulWidget {
   }) : super(key: key);
 
   @override
-  State<PdfViewerScreen> createState() => _PdfViewerScreenState();
+  State<ImageViewerScreen> createState() => _ImageViewerScreenState();
 }
 
-class _PdfViewerScreenState extends State<PdfViewerScreen> {
+class _ImageViewerScreenState extends State<ImageViewerScreen>
+    with SingleTickerProviderStateMixin {
   final FirestoreService _firestoreService = FirestoreService();
-  PDFViewController? _pdfViewController;
+  final TransformationController _transformController = TransformationController();
 
-  bool _isLoading = true;
-  bool _hasError = false;
-  String? _errorMessage;
-  String? _localPath;
-
-  int _totalPages = 0;
-  int _currentPage = 0;
-  int _initialSavedPage = 0;
   bool _isBookmarked = false;
   bool _isDownloading = false;
   bool _isFullscreen = false;
@@ -57,8 +49,12 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     super.initState();
     _recordView();
     _checkBookmark();
-    _loadSavedProgress();
-    _downloadPdf();
+  }
+
+  @override
+  void dispose() {
+    _transformController.dispose();
+    super.dispose();
   }
 
   void _recordView() {
@@ -103,77 +99,24 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     }
   }
 
-  void _loadSavedProgress() async {
-    if (widget.materialId == null || widget.materialId!.isEmpty) return;
-    try {
-      final prog = await _firestoreService.getPdfProgress(widget.materialId!);
-      final page = (prog['currentPage'] as num?)?.toInt() ?? 1;
-      if (page > 1) {
-        _initialSavedPage = page - 1; // 0-indexed for PDFView
-      }
-    } catch (_) {}
-  }
-
-  void _saveProgress(int pageIndex, int total) {
-    if (widget.materialId == null || widget.materialId!.isEmpty || total <= 0) return;
-    final curPage = pageIndex + 1;
-    final pct = ((curPage / total) * 100).clamp(0.0, 100.0);
-    _firestoreService.savePdfProgress(
-      widget.materialId!,
-      currentPage: curPage,
-      totalPages: total,
-      progressPercentage: pct,
-      courseId: widget.courseId,
-    );
-  }
-
-  Future<void> _downloadPdf() async {
-    setState(() {
-      _isLoading = true;
-      _hasError = false;
-      _errorMessage = null;
-    });
-
-    try {
-      final response = await http.get(Uri.parse(widget.url)).timeout(
-        const Duration(seconds: 60),
-      );
-
-      if (response.statusCode != 200) {
-        throw Exception('Server returned ${response.statusCode}');
-      }
-
-      final bytes = response.bodyBytes;
-      final dir = await getTemporaryDirectory();
-      final safeTitle = widget.title.replaceAll(RegExp(r'[^\w\s.-]'), '_');
-      final file = File('${dir.path}/$safeTitle.pdf');
-      await file.writeAsBytes(bytes, flush: true);
-
-      if (mounted) {
-        setState(() {
-          _localPath = file.path;
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-          _hasError = true;
-          _errorMessage = 'Could not load PDF: ${e.toString()}';
-        });
-      }
-    }
-  }
-
-  Future<void> _downloadToDevice() async {
+  Future<void> _downloadImage() async {
     if (widget.materialId != null && widget.materialId!.isNotEmpty) {
       _firestoreService.incrementMaterialDownload(widget.materialId!);
     }
     setState(() => _isDownloading = true);
 
     try {
+      final response = await http.get(Uri.parse(widget.url)).timeout(
+        const Duration(seconds: 30),
+      );
+
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}');
+      }
+
+      final ext = widget.url.toLowerCase().endsWith('.png') ? '.png' : '.jpg';
       final safeTitle = widget.title.replaceAll(RegExp(r'[^\w\s.-]'), '_');
+
       Directory? dir;
       if (Platform.isAndroid) {
         dir = Directory('/storage/emulated/0/Download');
@@ -184,14 +127,13 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
         dir = await getApplicationDocumentsDirectory();
       }
 
-      if (dir != null && _localPath != null) {
-        final targetFile = File('${dir.path}/$safeTitle.pdf');
-        final sourceFile = File(_localPath!);
-        await sourceFile.copy(targetFile.path);
+      if (dir != null) {
+        final file = File('${dir.path}/$safeTitle$ext');
+        await file.writeAsBytes(response.bodyBytes);
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('Saved to Downloads: ${targetFile.path}'),
+            content: Text('Saved to Downloads: ${file.path}'),
             backgroundColor: const Color(0xFF10B981),
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -210,7 +152,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     }
   }
 
-  void _sharePdf() {
+  void _shareImage() {
     Clipboard.setData(ClipboardData(text: widget.url));
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -218,7 +160,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
           children: [
             Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
             SizedBox(width: 8),
-            Text('PDF link copied to clipboard!'),
+            Text('Image link copied to clipboard!'),
           ],
         ),
         backgroundColor: const Color(0xFF10B981),
@@ -229,52 +171,50 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   }
 
   Future<void> _openExternally() async {
-    if (widget.materialId != null && widget.materialId!.isNotEmpty) {
-      _firestoreService.incrementMaterialDownload(widget.materialId!);
-    }
     final uri = Uri.parse(widget.url);
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  void _handleDoubleTap() {
+    if (_transformController.value.isIdentity()) {
+      _transformController.value = Matrix4.identity()..scale(2.5);
     } else {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not open PDF in browser')),
-        );
-      }
+      _transformController.value = Matrix4.identity();
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
-      backgroundColor: isDark ? AppTheme.darkBackground : const Color(0xFF0F172A),
+      backgroundColor: Colors.black,
       body: SafeArea(
         child: Column(
           children: [
-            // ─── 1. Top Bar Matching Video Player ──────────────────────
-            if (!_isFullscreen) _buildTopBar(isDark),
+            // ─── 1. Top Bar ─────────────────────────────────────────────
+            if (!_isFullscreen) _buildTopBar(),
 
             // ─── 2. Contributor & Metadata Header ───────────────────────
             if (!_isFullscreen && (widget.contributorName != null || widget.courseName != null))
-              _buildMetadataHeader(isDark),
+              _buildMetadataHeader(),
 
-            // ─── 3. PDF View Surface ────────────────────────────────────
+            // ─── 3. Image Surface with InteractiveViewer ────────────────
             Expanded(
-              child: _buildPdfSurface(),
+              child: _buildImageSurface(),
             ),
 
-            // ─── 4. Bottom Controls & Reading Progress Bar ──────────────
-            if (!_isLoading && !_hasError) _buildBottomControls(isDark),
+            // ─── 4. Bottom Controls Bar ─────────────────────────────────
+            _buildBottomControls(),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildTopBar(bool isDark) {
+  Widget _buildTopBar() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       decoration: const BoxDecoration(
@@ -321,15 +261,15 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
           // Share Button
           IconButton(
             icon: const Icon(Icons.share_rounded, color: Colors.white70, size: 20),
-            onPressed: _sharePdf,
+            onPressed: _shareImage,
             tooltip: 'Share',
           ),
-          // More Options Menu
+          // Popup menu
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert_rounded, color: Colors.white70, size: 20),
             color: const Color(0xFF1E293B),
             onSelected: (val) {
-              if (val == 'download') _downloadToDevice();
+              if (val == 'download') _downloadImage();
               if (val == 'browser') _openExternally();
             },
             itemBuilder: (ctx) => [
@@ -339,7 +279,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                   children: [
                     Icon(Icons.download_rounded, color: AppTheme.primaryColor, size: 18),
                     SizedBox(width: 10),
-                    Text('Download to Device', style: TextStyle(color: Colors.white, fontSize: 13)),
+                    Text('Download Image', style: TextStyle(color: Colors.white, fontSize: 13)),
                   ],
                 ),
               ),
@@ -360,7 +300,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     );
   }
 
-  Widget _buildMetadataHeader(bool isDark) {
+  Widget _buildMetadataHeader() {
     final name = widget.contributorName ?? 'Academic Contributor';
     final course = widget.courseName ?? 'Course Material';
     final dateStr = widget.createdAt != null
@@ -423,152 +363,90 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
               ],
             ),
           ),
-          // Page Badge
-          if (_totalPages > 0)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: AppTheme.primaryColor.withOpacity(0.15),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppTheme.primaryColor.withOpacity(0.3)),
-              ),
-              child: Text(
-                'Page ${_currentPage + 1} of $_totalPages',
-                style: const TextStyle(
-                  color: AppTheme.primaryColor,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 11,
-                ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: const Color(0xFF10B981).withOpacity(0.15),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFF10B981).withOpacity(0.3)),
+            ),
+            child: const Text(
+              'IMAGE NOTE',
+              style: TextStyle(
+                color: Color(0xFF10B981),
+                fontWeight: FontWeight.bold,
+                fontSize: 10,
               ),
             ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildPdfSurface() {
-    if (_isLoading) {
-      return const Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            CircularProgressIndicator(color: AppTheme.primaryColor),
-            SizedBox(height: 16),
-            Text(
-              'Loading PDF Document...',
-              style: TextStyle(color: Colors.white70, fontSize: 14),
-            ),
-          ],
-        ),
-      );
-    }
-
-    if (_hasError || _localPath == null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.picture_as_pdf_outlined, size: 56, color: Colors.redAccent),
-              const SizedBox(height: 16),
-              const Text(
-                'Could not load PDF',
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                _errorMessage ?? 'An error occurred while opening the document.',
-                style: const TextStyle(color: Colors.white60, fontSize: 12),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 24),
-              ElevatedButton.icon(
-                onPressed: _downloadPdf,
-                icon: const Icon(Icons.refresh_rounded, size: 16),
-                label: const Text('Retry'),
-                style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryColor),
-              ),
-              const SizedBox(height: 10),
-              OutlinedButton.icon(
-                onPressed: _openExternally,
-                icon: const Icon(Icons.open_in_browser_rounded, size: 16, color: Colors.white70),
-                label: const Text('Open in Browser', style: TextStyle(color: Colors.white70)),
-              ),
-            ],
+  Widget _buildImageSurface() {
+    return GestureDetector(
+      onDoubleTap: _handleDoubleTap,
+      child: Center(
+        child: InteractiveViewer(
+          transformationController: _transformController,
+          minScale: 0.8,
+          maxScale: 5.0,
+          child: Image.network(
+            widget.url,
+            fit: BoxFit.contain,
+            loadingBuilder: (context, child, loadingProgress) {
+              if (loadingProgress == null) return child;
+              final expected = loadingProgress.expectedTotalBytes;
+              final loaded = loadingProgress.cumulativeBytesLoaded;
+              final progress = expected != null ? loaded / expected : null;
+              return Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    CircularProgressIndicator(
+                      value: progress,
+                      color: AppTheme.primaryColor,
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Loading Image...',
+                      style: TextStyle(color: Colors.white70, fontSize: 13),
+                    ),
+                  ],
+                ),
+              );
+            },
+            errorBuilder: (context, error, stackTrace) {
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.broken_image_rounded, size: 56, color: Colors.redAccent),
+                      const SizedBox(height: 12),
+                      const Text(
+                        'Could not load image',
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+                      ),
+                      const SizedBox(height: 8),
+                      OutlinedButton(
+                        onPressed: _openExternally,
+                        child: const Text('Open in Browser', style: TextStyle(color: Colors.white70)),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
           ),
         ),
-      );
-    }
-
-    return Stack(
-      children: [
-        PDFView(
-          filePath: _localPath!,
-          enableSwipe: true,
-          swipeHorizontal: false,
-          autoSpacing: true,
-          pageFling: true,
-          pageSnap: true,
-          defaultPage: _initialSavedPage,
-          fitPolicy: FitPolicy.BOTH,
-          preventLinkNavigation: false,
-          onViewCreated: (controller) {
-            _pdfViewController = controller;
-          },
-          onRender: (pages) {
-            if (mounted) {
-              setState(() {
-                _totalPages = pages ?? 0;
-              });
-              if (_initialSavedPage > 0) {
-                _pdfViewController?.setPage(_initialSavedPage);
-              }
-            }
-          },
-          onError: (error) {
-            if (mounted) {
-              setState(() {
-                _hasError = true;
-                _errorMessage = error.toString();
-              });
-            }
-          },
-          onPageChanged: (page, total) {
-            if (mounted && page != null) {
-              setState(() {
-                _currentPage = page;
-                _totalPages = total ?? _totalPages;
-              });
-              _saveProgress(page, _totalPages);
-            }
-          },
-        ),
-        // Floating Fullscreen toggle button
-        Positioned(
-          right: 14,
-          top: 14,
-          child: GestureDetector(
-            onTap: () => setState(() => _isFullscreen = !_isFullscreen),
-            child: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.6),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                _isFullscreen ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded,
-                color: Colors.white,
-                size: 22,
-              ),
-            ),
-          ),
-        ),
-      ],
+      ),
     );
   }
 
-  Widget _buildBottomControls(bool isDark) {
+  Widget _buildBottomControls() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: const BoxDecoration(
@@ -576,56 +454,34 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
         border: Border(top: BorderSide(color: Color(0xFF1E293B))),
       ),
       child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          // Previous Page Button
-          IconButton(
-            icon: const Icon(Icons.chevron_left_rounded, color: Colors.white, size: 28),
-            onPressed: _currentPage > 0
-                ? () {
-                    final prev = _currentPage - 1;
-                    _pdfViewController?.setPage(prev);
-                  }
-                : null,
-          ),
-          // Page Slider
-          Expanded(
-            child: SliderTheme(
-              data: SliderTheme.of(context).copyWith(
-                activeTrackColor: AppTheme.primaryColor,
-                inactiveTrackColor: Colors.white24,
-                thumbColor: Colors.white,
-                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                trackHeight: 3,
+          Row(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.restart_alt_rounded, color: Colors.white70, size: 22),
+                tooltip: 'Reset Zoom',
+                onPressed: () {
+                  _transformController.value = Matrix4.identity();
+                },
               ),
-              child: Slider(
-                value: _totalPages > 1
-                    ? (_currentPage / (_totalPages - 1)).clamp(0.0, 1.0)
-                    : 0.0,
-                onChanged: _totalPages > 1
-                    ? (val) {
-                        final target = (val * (_totalPages - 1)).round();
-                        _pdfViewController?.setPage(target);
-                      }
-                    : null,
+              IconButton(
+                icon: Icon(
+                  _isFullscreen ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded,
+                  color: Colors.white70,
+                  size: 24,
+                ),
+                tooltip: 'Toggle Fullscreen',
+                onPressed: () {
+                  setState(() => _isFullscreen = !_isFullscreen);
+                },
               ),
-            ),
+            ],
           ),
-          // Next Page Button
-          IconButton(
-            icon: const Icon(Icons.chevron_right_rounded, color: Colors.white, size: 28),
-            onPressed: (_currentPage < _totalPages - 1)
-                ? () {
-                    final next = _currentPage + 1;
-                    _pdfViewController?.setPage(next);
-                  }
-                : null,
-          ),
-          const SizedBox(width: 8),
-          // Quick Download Action
           GestureDetector(
-            onTap: _isDownloading ? null : _downloadToDevice,
+            onTap: _isDownloading ? null : _downloadImage,
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               decoration: BoxDecoration(
                 color: AppTheme.primaryColor,
                 borderRadius: BorderRadius.circular(16),
@@ -641,7 +497,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                       : const Icon(Icons.download_rounded, color: Colors.white, size: 16),
                   const SizedBox(width: 6),
                   const Text(
-                    'Save',
+                    'Save Image',
                     style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
                   ),
                 ],
