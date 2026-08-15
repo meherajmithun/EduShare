@@ -93,6 +93,7 @@ class _CourseDetailsScreenState extends State<CourseDetailsScreen> with SingleTi
           builder: (_) => PdfViewerScreen(
             url: m.fileUrl!,
             title: m.title,
+            materialId: m.id,
           ),
         ),
       );

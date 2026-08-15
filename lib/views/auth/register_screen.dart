@@ -124,12 +124,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
         }
       }
     } else {
-      // Standard registration (student / legacy admin)
+      // Standard registration (student / contributor / legacy admin)
       final error = await authService.register(
         name: _nameController.text.trim(),
         email: _emailController.text.trim(),
         password: _passwordController.text,
         department: _selectedDepartment,
+        departmentId: _selectedDepartmentId,
         role: _selectedRole,
         studentId: _selectedRole == 'student' ? _studentIdController.text.trim() : null,
       );

@@ -10,6 +10,7 @@ import 'package:edushare/models/course_model.dart';
 import 'package:edushare/models/material_model.dart';
 import 'package:edushare/models/video_comment_model.dart';
 import 'package:edushare/models/material_rating_model.dart';
+import 'package:edushare/models/contributor_profile_model.dart';
 import 'package:edushare/views/profile/contributor_profile_screen.dart';
 import 'package:edushare/widgets/glass_card.dart';
 import 'package:edushare/widgets/material_rating_sheet.dart';
@@ -40,6 +41,9 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
   late TabController _tabController;
 
   late MaterialModel _currentVideo;
+  ContributorProfileModel? _contributorProfile;
+  bool _isFollowing = false;
+  bool _followingLoading = false;
 
   // ─── YouTube player ───────────────────────────────────────────────────
   YoutubePlayerController? _youtubeController;
@@ -52,6 +56,10 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
   bool _playerInitializing = false;
   bool _playerError = false;
   String? _playerErrorMsg;
+  bool _isPlaying = true;
+  bool _isMuted = false;
+  int _currentPosition = 0;
+  int _totalDuration = 0;
 
   // Video progress state
   Map<String, Map<String, dynamic>> _progressMap = {}; // materialId -> {position, duration, completed}
@@ -69,6 +77,7 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
   bool _loadingRatings = false;
 
   Timer? _progressSaveTimer;
+  Timer? _positionUpdateTimer;
 
   @override
   void initState() {
@@ -79,11 +88,42 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
 
     _initVideoPlayer(_currentVideo);
     _loadCourseProgress();
+    _loadContributorProfile();
     _checkBookmark();
     _loadComments();
     _loadRatings();
     _incrementView();
     _recordInitialWatch();
+
+    // Position updater for custom controls
+    _positionUpdateTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      _updatePlaybackState();
+    });
+  }
+
+  void _updatePlaybackState() {
+    if (!mounted) return;
+    int pos = 0;
+    int dur = 0;
+    bool playing = false;
+
+    if (_youtubeController != null) {
+      pos = _youtubeController!.value.position.inSeconds;
+      dur = _youtubeController!.metadata.duration.inSeconds;
+      playing = _youtubeController!.value.isPlaying;
+    } else if (_nativeController != null && _nativeController!.value.isInitialized) {
+      pos = _nativeController!.value.position.inSeconds;
+      dur = _nativeController!.value.duration.inSeconds;
+      playing = _nativeController!.value.isPlaying;
+    }
+
+    if (pos != _currentPosition || dur != _totalDuration || playing != _isPlaying) {
+      setState(() {
+        _currentPosition = pos;
+        if (dur > 0) _totalDuration = dur;
+        _isPlaying = playing;
+      });
+    }
   }
 
   void _recordInitialWatch() async {
@@ -114,12 +154,44 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
     }
   }
 
+  void _loadContributorProfile() async {
+    if (_currentVideo.uploadedBy.isNotEmpty) {
+      try {
+        final prof = await _firestoreService.getContributorProfile(_currentVideo.uploadedBy);
+        if (mounted) {
+          setState(() {
+            _contributorProfile = prof;
+            _isFollowing = prof.isFollowing;
+          });
+        }
+      } catch (_) {}
+    }
+  }
+
+  void _toggleFollow() async {
+    if (_currentVideo.uploadedBy.isEmpty || _followingLoading) return;
+    setState(() => _followingLoading = true);
+    final wasFollowing = _isFollowing;
+    setState(() => _isFollowing = !wasFollowing);
+
+    try {
+      if (wasFollowing) {
+        await _firestoreService.unfollowContributor(_currentVideo.uploadedBy);
+      } else {
+        await _firestoreService.followContributor(_currentVideo.uploadedBy);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _isFollowing = wasFollowing);
+    } finally {
+      if (mounted) setState(() => _followingLoading = false);
+    }
+  }
+
   // ─── Player initialisation ────────────────────────────────────────────
 
   void _initVideoPlayer(MaterialModel video) {
     _progressSaveTimer?.cancel();
 
-    // Dispose previous controllers
     _disposeNativeController();
     _youtubeController?.removeListener(_onYoutubeStateChange);
     _youtubeController?.dispose();
@@ -129,27 +201,25 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
       _playerInitializing = true;
       _playerError = false;
       _playerErrorMsg = null;
+      _currentPosition = 0;
+      _totalDuration = 0;
     });
 
-    // Get last saved position
     final savedProg = _progressMap[video.id];
     final startPos = (savedProg?['lastPosition'] as num?)?.toInt() ?? 0;
 
-    // ── Detect source ─────────────────────────────────────────────────
     if (video.isYouTube || video.isLegacyYouTube) {
       _initYouTubePlayer(video, startPos);
     } else if (video.isCloudinaryVideo) {
       _initNativePlayer(video, startPos);
     } else {
-      // No valid playback URL
       setState(() {
         _playerInitializing = false;
         _playerError = true;
-        _playerErrorMsg = 'This video has no playable source. The URL may be missing or invalid.';
+        _playerErrorMsg = 'This video has no playable source.';
       });
     }
 
-    // Save progress every 5 seconds
     _progressSaveTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       _saveCurrentProgress();
     });
@@ -163,7 +233,7 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
       setState(() {
         _playerInitializing = false;
         _playerError = true;
-        _playerErrorMsg = 'Could not extract YouTube video ID from the URL.';
+        _playerErrorMsg = 'Could not extract YouTube video ID.';
       });
       return;
     }
@@ -172,8 +242,9 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
       initialVideoId: videoId,
       flags: YoutubePlayerFlags(
         autoPlay: true,
-        mute: false,
+        mute: _isMuted,
         startAt: startPos > 5 ? startPos - 2 : startPos,
+        showLiveFullscreenButton: true,
       ),
     )..addListener(_onYoutubeStateChange);
 
@@ -199,10 +270,10 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
       final controller = VideoPlayerController.networkUrl(Uri.parse(url));
       await controller.initialize();
 
-      // Seek to last saved position
       if (startPos > 5) {
         await controller.seekTo(Duration(seconds: startPos - 2));
       }
+      if (_isMuted) controller.setVolume(0);
 
       if (!mounted) {
         controller.dispose();
@@ -215,17 +286,10 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
         looping: false,
         allowFullScreen: true,
         allowMuting: true,
-        showControls: true,
-        materialProgressColors: ChewieProgressColors(
-          playedColor: AppTheme.primaryColor,
-          handleColor: AppTheme.primaryColor,
-          backgroundColor: AppTheme.primaryColor.withOpacity(0.2),
-          bufferedColor: AppTheme.primaryColor.withOpacity(0.4),
-        ),
+        showControls: false, // We render our custom Figma-styled controls
         errorBuilder: (ctx, msg) => _buildPlayerErrorWidget(msg),
       );
 
-      // Listen for end-of-video
       controller.addListener(() {
         if (controller.value.position >= controller.value.duration &&
             controller.value.duration.inSeconds > 0) {
@@ -258,8 +322,6 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
     _nativeController?.dispose();
     _nativeController = null;
   }
-
-  // ─── Player event handlers ────────────────────────────────────────────
 
   void _onYoutubeStateChange() {
     if (_youtubeController == null) return;
@@ -315,10 +377,23 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
     );
   }
 
-  void _playNextVideo() {
+  MaterialModel? _getNextVideo() {
     final index = widget.allCourseVideos.indexWhere((v) => v.id == _currentVideo.id);
     if (index != -1 && index < widget.allCourseVideos.length - 1) {
-      _switchVideo(widget.allCourseVideos[index + 1]);
+      return widget.allCourseVideos[index + 1];
+    }
+    // Fallback to first uncompleted video
+    final uncompleted = widget.allCourseVideos.where((v) => _progressMap[v.id]?['completed'] != true && v.id != _currentVideo.id);
+    if (uncompleted.isNotEmpty) {
+      return uncompleted.first;
+    }
+    return null;
+  }
+
+  void _playNextVideo() {
+    final next = _getNextVideo();
+    if (next != null) {
+      _switchVideo(next);
     }
   }
 
@@ -331,6 +406,7 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
     });
 
     _initVideoPlayer(nextVideo);
+    _loadContributorProfile();
     _checkBookmark();
     _loadComments();
     _loadRatings();
@@ -338,8 +414,46 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
     _recordInitialWatch();
   }
 
-  void _retryPlayer() {
-    _initVideoPlayer(_currentVideo);
+  void _togglePlayPause() {
+    if (_youtubeController != null) {
+      if (_isPlaying) {
+        _youtubeController!.pause();
+      } else {
+        _youtubeController!.play();
+      }
+    } else if (_nativeController != null && _nativeController!.value.isInitialized) {
+      if (_isPlaying) {
+        _nativeController!.pause();
+      } else {
+        _nativeController!.play();
+      }
+    }
+    setState(() => _isPlaying = !_isPlaying);
+  }
+
+  void _toggleMute() {
+    final newMute = !_isMuted;
+    if (_youtubeController != null) {
+      if (newMute) {
+        _youtubeController!.mute();
+      } else {
+        _youtubeController!.unMute();
+      }
+    } else if (_nativeController != null) {
+      _nativeController!.setVolume(newMute ? 0.0 : 1.0);
+    }
+    setState(() => _isMuted = newMute);
+  }
+
+  void _seekToPosition(double relativeFraction) {
+    final dur = _totalDuration > 0 ? _totalDuration : 1;
+    final targetSec = (dur * relativeFraction).toInt();
+    if (_youtubeController != null) {
+      _youtubeController!.seekTo(Duration(seconds: targetSec));
+    } else if (_nativeController != null && _nativeController!.value.isInitialized) {
+      _nativeController!.seekTo(Duration(seconds: targetSec));
+    }
+    setState(() => _currentPosition = targetSec);
   }
 
   // ─── Data loading ─────────────────────────────────────────────────────
@@ -440,10 +554,24 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
     }
   }
 
+  String _formatViews(int count) {
+    if (count >= 1000000) return '${(count / 1000000).toStringAsFixed(1)}M Views';
+    if (count >= 1000) return '${(count / 1000).toStringAsFixed(1)}K Views';
+    return '$count Views';
+  }
+
+  String _formatDuration(int seconds) {
+    if (seconds <= 0) return '00:00';
+    final m = seconds ~/ 60;
+    final s = seconds % 60;
+    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  }
+
   @override
   void dispose() {
     _saveCurrentProgress();
     _progressSaveTimer?.cancel();
+    _positionUpdateTimer?.cancel();
     _youtubeController?.removeListener(_onYoutubeStateChange);
     _youtubeController?.dispose();
     _disposeNativeController();
@@ -464,266 +592,384 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
         .where((v) => _progressMap[v.id]?['completed'] == true)
         .length;
     final progressPct = totalVideos > 0 ? (completedCount / totalVideos) : 0.0;
+    final nextVideo = _getNextVideo();
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          widget.course.code,
-          style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-        ),
-        actions: [
-          IconButton(
-            icon: Icon(_isBookmarked ? Icons.bookmark_rounded : Icons.bookmark_border_rounded),
-            color: _isBookmarked ? AppTheme.primaryColor : null,
-            onPressed: _toggleBookmark,
-            tooltip: _isBookmarked ? 'Remove Bookmark' : 'Bookmark Video',
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          // ─── Video Player ─────────────────────────────────────────────
-          AspectRatio(
-            aspectRatio: 16 / 9,
-            child: Container(
-              color: Colors.black,
-              child: _buildPlayerWidget(),
-            ),
-          ),
+      backgroundColor: isDark ? AppTheme.darkBackground : AppTheme.lightBackground,
+      body: SafeArea(
+        top: false,
+        child: Column(
+          children: [
+            // ─── 1. Video Player Area with Custom Overlay Controls ──────
+            _buildVideoPlayerArea(),
 
-          // ─── Header + Tabs ────────────────────────────────────────────
-          Expanded(
-            child: NestedScrollView(
-              headerSliverBuilder: (context, innerBoxIsScrolled) {
-                return [
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _currentVideo.title,
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 17,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-
-                          // Views, Date, Rating
-                          Row(
-                            children: [
-                              Icon(Icons.remove_red_eye_outlined, size: 14, color: theme.disabledColor),
-                              const SizedBox(width: 4),
-                              Text(
-                                '$_viewsCount views',
-                                style: theme.textTheme.bodyMedium?.copyWith(
-                                    fontSize: 12, color: theme.disabledColor),
-                              ),
-                              const SizedBox(width: 12),
-                              Icon(Icons.calendar_today_outlined, size: 14, color: theme.disabledColor),
-                              const SizedBox(width: 4),
-                              Text(
-                                DateFormat('MMM dd, yyyy').format(_currentVideo.createdAt),
-                                style: theme.textTheme.bodyMedium?.copyWith(
-                                    fontSize: 12, color: theme.disabledColor),
-                              ),
-                              const Spacer(),
-                              InkWell(
-                                onTap: () {
-                                  MaterialRatingSheet.show(
-                                    context,
-                                    _currentVideo,
-                                    onRatingChanged: _loadRatings,
-                                  );
-                                },
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: Colors.amber.withOpacity(0.15),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      const Icon(Icons.star_rounded, color: Colors.amber, size: 14),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        _currentVideo.avgRating > 0
-                                            ? _currentVideo.avgRating.toStringAsFixed(1)
-                                            : 'Rate',
-                                        style: const TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.amber,
-                                        ),
-                                      ),
-                                    ],
+            // ─── 2. Scrollable Body: Metadata + Contributor + Tabs ───────
+            Expanded(
+              child: NestedScrollView(
+                headerSliverBuilder: (context, innerBoxIsScrolled) {
+                  return [
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // Title + Bookmark Button Row
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    _currentVideo.title,
+                                    style: theme.textTheme.titleMedium?.copyWith(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 18,
+                                      color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+                                    ),
                                   ),
                                 ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-
-                          // Contributor + Auto-play
-                          Row(
-                            children: [
-                              InkWell(
-                                onTap: () {
-                                  if (_currentVideo.uploadedBy.isNotEmpty) {
-                                    Navigator.of(context).push(MaterialPageRoute(
-                                      builder: (_) => ContributorProfileScreen(
-                                        contributorId: _currentVideo.uploadedBy,
-                                        contributorName: _currentVideo.contributorName,
-                                      ),
-                                    ));
-                                  }
-                                },
-                                child: Row(
-                                  children: [
-                                    CircleAvatar(
-                                      radius: 14,
-                                      backgroundColor: AppTheme.primaryColor,
-                                      child: Text(
-                                        _currentVideo.contributorName.isNotEmpty
-                                            ? _currentVideo.contributorName[0].toUpperCase()
-                                            : 'C',
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.bold,
-                                        ),
+                                const SizedBox(width: 12),
+                                GestureDetector(
+                                  onTap: _toggleBookmark,
+                                  child: Container(
+                                    width: 44,
+                                    height: 44,
+                                    decoration: BoxDecoration(
+                                      color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: Center(
+                                      child: Icon(
+                                        _isBookmarked ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
+                                        color: _isBookmarked ? AppTheme.primaryColor : (isDark ? Colors.white70 : Colors.black54),
+                                        size: 22,
                                       ),
                                     ),
-                                    const SizedBox(width: 8),
-                                    Text(
-                                      _currentVideo.contributorName,
-                                      style: theme.textTheme.bodyMedium?.copyWith(
-                                        fontWeight: FontWeight.bold,
-                                        color: AppTheme.primaryColor,
-                                      ),
-                                    ),
-                                  ],
+                                  ),
                                 ),
-                              ),
-                              const Spacer(),
-                              Row(
-                                children: [
-                                  Text(
-                                    'Auto-play Next',
-                                    style: theme.textTheme.bodyMedium?.copyWith(fontSize: 11),
-                                  ),
-                                  Switch(
-                                    value: _autoPlayNext,
-                                    onChanged: (val) => setState(() => _autoPlayNext = val),
-                                    activeColor: AppTheme.primaryColor,
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
 
-                          // Description
-                          if (_currentVideo.description.isNotEmpty)
-                            Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: isDark ? AppTheme.darkSurface : AppTheme.lightSurface,
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: Text(
-                                _currentVideo.description,
-                                style: theme.textTheme.bodyMedium?.copyWith(fontSize: 13),
+                            // Views • Upload Date
+                            Text(
+                              '${_formatViews(_viewsCount)} • ${DateFormat('MMM d, yyyy').format(_currentVideo.createdAt)}',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
                               ),
                             ),
-                          const SizedBox(height: 8),
-                        ],
-                      ),
-                    ),
-                  ),
+                            const SizedBox(height: 16),
 
-                  // Tabs Header
-                  SliverPersistentHeader(
-                    pinned: true,
-                    delegate: _SliverTabBarDelegate(
-                      TabBar(
-                        controller: _tabController,
-                        indicatorColor: AppTheme.primaryColor,
-                        labelColor: AppTheme.primaryColor,
-                        unselectedLabelColor: isDark
-                            ? AppTheme.darkTextSecondary
-                            : AppTheme.lightTextSecondary,
-                        tabs: const [
-                          Tab(text: 'Playlist'),
-                          Tab(text: 'Comments'),
-                          Tab(text: 'Reviews'),
-                          Tab(text: 'Resources'),
-                        ],
+                            // Contributor Row with Follow Button
+                            _buildContributorRow(isDark, theme),
+                            const SizedBox(height: 16),
+                          ],
+                        ),
                       ),
-                      isDark: isDark,
                     ),
-                  ),
-                ];
-              },
-              body: TabBarView(
-                controller: _tabController,
-                children: [
-                  _buildPlaylistTab(progressPct, completedCount, totalVideos),
-                  _buildCommentsTab(),
-                  _buildReviewsTab(),
-                  _buildResourcesTab(),
-                ],
+
+                    // Tabs Header
+                    SliverPersistentHeader(
+                      pinned: true,
+                      delegate: _SliverTabBarDelegate(
+                        TabBar(
+                          controller: _tabController,
+                          indicatorColor: AppTheme.primaryColor,
+                          indicatorWeight: 3,
+                          labelColor: AppTheme.primaryColor,
+                          unselectedLabelColor: isDark
+                              ? AppTheme.darkTextSecondary
+                              : AppTheme.lightTextSecondary,
+                          labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                          tabs: [
+                            const Tab(text: 'Playlist'),
+                            const Tab(text: 'Transcript'),
+                            Tab(text: 'Comments (${_comments.length})'),
+                            const Tab(text: 'Bookmarks'),
+                          ],
+                        ),
+                        isDark: isDark,
+                      ),
+                    ),
+                  ];
+                },
+                body: TabBarView(
+                  controller: _tabController,
+                  children: [
+                    _buildPlaylistTab(progressPct, completedCount, totalVideos, isDark, theme),
+                    _buildTranscriptTab(isDark, theme),
+                    _buildCommentsTab(isDark, theme),
+                    _buildBookmarksTab(isDark, theme),
+                  ],
+                ),
               ),
             ),
-          ),
-        ],
+
+            // ─── 3. Bottom Sticky Bar (UP NEXT / Continue) ──────────────
+            _buildBottomStickyBar(nextVideo, isDark, theme),
+          ],
+        ),
       ),
     );
   }
 
-  // ─── Player widget builder ────────────────────────────────────────────
+  // ─── Video Player Area ────────────────────────────────────────────────
 
-  Widget _buildPlayerWidget() {
-    // Loading state
-    if (_playerInitializing) {
-      return const Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+  Widget _buildVideoPlayerArea() {
+    final curPosStr = _formatDuration(_currentPosition);
+    final totDurStr = _formatDuration(_totalDuration);
+    final progressFraction = _totalDuration > 0 ? (_currentPosition / _totalDuration).clamp(0.0, 1.0) : 0.0;
+
+    return Container(
+      color: Colors.black,
+      child: AspectRatio(
+        aspectRatio: 16 / 9,
+        child: Stack(
+          alignment: Alignment.center,
           children: [
-            CircularProgressIndicator(color: AppTheme.primaryColor),
-            SizedBox(height: 12),
-            Text(
-              'Loading video...',
-              style: TextStyle(color: Colors.white70, fontSize: 13),
+            // Video Surface
+            Positioned.fill(child: _buildPlayerWidget()),
+
+            // Gradient Overlays for controls visibility
+            Positioned.fill(
+              child: Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      Colors.black.withOpacity(0.6),
+                      Colors.transparent,
+                      Colors.black.withOpacity(0.7),
+                    ],
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                  ),
+                ),
+              ),
+            ),
+
+            // Top Bar: Back Button & 3-dots Menu
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 8,
+              left: 14,
+              right: 14,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  GestureDetector(
+                    onTap: () => Navigator.of(context).pop(),
+                    child: Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.5),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.chevron_left_rounded, color: Colors.white, size: 26),
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: () => _showVideoOptionsMenu(),
+                    child: Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.5),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.more_vert_rounded, color: Colors.white, size: 20),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // Center Play / Pause Button
+            Center(
+              child: GestureDetector(
+                onTap: _togglePlayPause,
+                child: Container(
+                  width: 58,
+                  height: 58,
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryColor.withOpacity(0.9),
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppTheme.primaryColor.withOpacity(0.4),
+                        blurRadius: 16,
+                        spreadRadius: 2,
+                      ),
+                    ],
+                  ),
+                  child: Icon(
+                    _isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                    color: Colors.white,
+                    size: 34,
+                  ),
+                ),
+              ),
+            ),
+
+            // Bottom Controls Bar
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: 8,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Blue scrubber slider
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onHorizontalDragUpdate: (details) {
+                      final box = context.findRenderObject() as RenderBox?;
+                      if (box != null && box.size.width > 0) {
+                        final rel = (details.localPosition.dx / box.size.width).clamp(0.0, 1.0);
+                        _seekToPosition(rel);
+                      }
+                    },
+                    onTapDown: (details) {
+                      final box = context.findRenderObject() as RenderBox?;
+                      if (box != null && box.size.width > 0) {
+                        final rel = (details.localPosition.dx / box.size.width).clamp(0.0, 1.0);
+                        _seekToPosition(rel);
+                      }
+                    },
+                    child: SizedBox(
+                      height: 18,
+                      child: Stack(
+                        alignment: Alignment.centerLeft,
+                        children: [
+                          // Background track
+                          Container(
+                            height: 4,
+                            width: double.infinity,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.25),
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                          // Played track
+                          FractionallySizedBox(
+                            widthFactor: progressFraction,
+                            child: Container(
+                              height: 4,
+                              decoration: BoxDecoration(
+                                color: AppTheme.primaryColor,
+                                borderRadius: BorderRadius.circular(2),
+                              ),
+                            ),
+                          ),
+                          // Scrubber handle
+                          Align(
+                            alignment: Alignment(progressFraction * 2 - 1, 0),
+                            child: Container(
+                              width: 12,
+                              height: 12,
+                              decoration: const BoxDecoration(
+                                color: Colors.white,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+
+                  // Time and icons row
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        '$curPosStr / $totDurStr',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      Row(
+                        children: [
+                          GestureDetector(
+                            onTap: _toggleMute,
+                            child: Icon(
+                              _isMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+                              color: Colors.white,
+                              size: 20,
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          const Icon(Icons.fullscreen_rounded, color: Colors.white, size: 22),
+                        ],
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  void _showVideoOptionsMenu() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1E293B),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.star_outline_rounded, color: Colors.amber),
+                title: const Text('Rate this Lecture', style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  MaterialRatingSheet.show(context, _currentVideo, onRatingChanged: _loadRatings);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.replay_rounded, color: Colors.white70),
+                title: const Text('Reload Video Player', style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _initVideoPlayer(_currentVideo);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPlayerWidget() {
+    if (_playerInitializing) {
+      return const Center(
+        child: CircularProgressIndicator(color: AppTheme.primaryColor),
       );
     }
-
-    // Error state
     if (_playerError) {
       return _buildPlayerErrorWidget(_playerErrorMsg ?? 'Unknown error');
     }
-
-    // YouTube player
     if (_youtubeController != null) {
       return YoutubePlayer(
         controller: _youtubeController!,
-        showVideoProgressIndicator: true,
-        progressIndicatorColor: AppTheme.primaryColor,
+        showVideoProgressIndicator: false,
       );
     }
-
-    // Native (Cloudinary) player via Chewie
     if (_chewieController != null) {
       return Chewie(controller: _chewieController!);
     }
-
-    // No player available
     return _buildPlayerErrorWidget('No video player available.');
   }
 
@@ -736,30 +982,21 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.error_outline_rounded, color: Colors.redAccent, size: 40),
-              const SizedBox(height: 12),
-              Text(
-                'Playback Error',
-                style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 6),
+              const Icon(Icons.error_outline_rounded, color: Colors.redAccent, size: 36),
+              const SizedBox(height: 8),
               Text(
                 message,
-                style: const TextStyle(color: Colors.white60, fontSize: 12),
+                style: const TextStyle(color: Colors.white70, fontSize: 12),
                 textAlign: TextAlign.center,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
               ),
-              const SizedBox(height: 16),
-              ElevatedButton.icon(
-                onPressed: _retryPlayer,
-                icon: const Icon(Icons.refresh_rounded, size: 16),
-                label: const Text('Retry'),
+              const SizedBox(height: 12),
+              ElevatedButton(
+                onPressed: () => _initVideoPlayer(_currentVideo),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.primaryColor,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 ),
+                child: const Text('Retry', style: TextStyle(color: Colors.white, fontSize: 12)),
               ),
             ],
           ),
@@ -768,126 +1005,374 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
     );
   }
 
-  // ─── 1. Playlist Tab ───────────────────────────────────────────────────
-  Widget _buildPlaylistTab(double progressPct, int completedCount, int totalVideos) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+  // ─── Contributor Row ──────────────────────────────────────────────────
 
-    return Column(
+  Widget _buildContributorRow(bool isDark, ThemeData theme) {
+    final photo = _contributorProfile?.profilePhotoUrl ?? '';
+    final name = _contributorProfile?.name.isNotEmpty == true
+        ? _contributorProfile!.name
+        : (_currentVideo.contributorName.isNotEmpty ? _currentVideo.contributorName : 'Instructor');
+    final role = _contributorProfile?.designation.isNotEmpty == true
+        ? _contributorProfile!.designation
+        : (_contributorProfile?.bio.isNotEmpty == true
+            ? _contributorProfile!.bio
+            : '${widget.course.name.isNotEmpty ? widget.course.name : 'Course'} Instructor');
+
+    final initials = name.isNotEmpty
+        ? name.trim().split(' ').map((w) => w.isNotEmpty ? w[0] : '').take(2).join().toUpperCase()
+        : 'IN';
+
+    return Row(
       children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          color: isDark ? AppTheme.darkCard : AppTheme.lightCard,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        GestureDetector(
+          onTap: () {
+            if (_currentVideo.uploadedBy.isNotEmpty) {
+              Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => ContributorProfileScreen(
+                  contributorId: _currentVideo.uploadedBy,
+                  contributorName: name,
+                ),
+              ));
+            }
+          },
+          child: Row(
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: AppTheme.primaryColor.withOpacity(0.2),
+                  image: photo.isNotEmpty
+                      ? DecorationImage(image: NetworkImage(photo), fit: BoxFit.cover)
+                      : null,
+                ),
+                child: photo.isEmpty
+                    ? Center(
+                        child: Text(
+                          initials,
+                          style: const TextStyle(
+                            color: AppTheme.primaryColor,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                          ),
+                        ),
+                      )
+                    : null,
+              ),
+              const SizedBox(width: 12),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Course Progress: $completedCount of $totalVideos completed',
-                    style: theme.textTheme.bodyMedium
-                        ?.copyWith(fontWeight: FontWeight.bold, fontSize: 13),
-                  ),
-                  Text(
-                    '${(progressPct * 100).toInt()}%',
-                    style: theme.textTheme.bodyMedium?.copyWith(
+                    name,
+                    style: TextStyle(
                       fontWeight: FontWeight.bold,
-                      color: AppTheme.primaryColor,
+                      fontSize: 15,
+                      color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
                     ),
                   ),
+                  const SizedBox(height: 2),
+                  Text(
+                    role,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ],
-              ),
-              const SizedBox(height: 6),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(6),
-                child: LinearProgressIndicator(
-                  value: progressPct,
-                  minHeight: 6,
-                  backgroundColor: AppTheme.primaryColor.withOpacity(0.15),
-                  color: AppTheme.primaryColor,
-                ),
               ),
             ],
           ),
         ),
-        Expanded(
-          child: ListView.builder(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            itemCount: widget.allCourseVideos.length,
-            itemBuilder: (context, index) {
-              final video = widget.allCourseVideos[index];
-              final isCurrent = video.id == _currentVideo.id;
-              final isCompleted = _progressMap[video.id]?['completed'] == true;
-
-              return Container(
-                color: isCurrent
-                    ? AppTheme.primaryColor.withOpacity(0.1)
-                    : Colors.transparent,
-                child: ListTile(
-                  leading: Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      Container(
-                        width: 36,
-                        height: 36,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: isCompleted
-                              ? Colors.green.withOpacity(0.15)
-                              : (isCurrent
-                                  ? AppTheme.primaryColor.withOpacity(0.2)
-                                  : theme.dividerColor.withOpacity(0.1)),
-                        ),
-                        child: Icon(
-                          isCompleted
-                              ? Icons.check_circle_rounded
-                              : (isCurrent
-                                  ? Icons.play_arrow_rounded
-                                  : Icons.video_library_outlined),
-                          color: isCompleted
-                              ? Colors.green
-                              : (isCurrent ? AppTheme.primaryColor : theme.disabledColor),
-                          size: 20,
-                        ),
-                      ),
-                    ],
-                  ),
-                  title: Text(
-                    '${index + 1}. ${video.title}',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      fontWeight: isCurrent ? FontWeight.bold : FontWeight.w500,
-                      color: isCurrent ? AppTheme.primaryColor : null,
-                    ),
-                  ),
-                  subtitle: Text(
-                    video.contributorName,
-                    style: theme.textTheme.bodyMedium
-                        ?.copyWith(fontSize: 11, color: theme.disabledColor),
-                  ),
-                  trailing: isCurrent
-                      ? const Text(
-                          'PLAYING',
-                          style: TextStyle(
-                            color: AppTheme.primaryColor,
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        )
-                      : null,
-                  onTap: () => _switchVideo(video),
-                ),
-              );
-            },
+        const Spacer(),
+        // Follow Button
+        GestureDetector(
+          onTap: _toggleFollow,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 9),
+            decoration: BoxDecoration(
+              color: _isFollowing ? AppTheme.primaryColor : const Color(0xFF1E293B),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: _isFollowing ? AppTheme.primaryColor : const Color(0xFF334155),
+              ),
+            ),
+            child: Text(
+              _isFollowing ? 'Following' : 'Follow',
+              style: TextStyle(
+                color: _isFollowing ? Colors.white : Colors.white70,
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
           ),
         ),
       ],
     );
   }
 
-  // ─── 2. Comments Tab ───────────────────────────────────────────────────
-  Widget _buildCommentsTab() {
-    final theme = Theme.of(context);
+  // ─── 1. Playlist Tab ───────────────────────────────────────────────────
+
+  Widget _buildPlaylistTab(
+    double progressPct,
+    int completedCount,
+    int totalVideos,
+    bool isDark,
+    ThemeData theme,
+  ) {
+    return ListView(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      children: [
+        // Course Progress Card
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF131B2A) : AppTheme.lightCard,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isDark ? const Color(0xFF223048) : AppTheme.lightBorder,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'COURSE PROGRESS',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.1,
+                      color: Color(0xFF94A3B8),
+                    ),
+                  ),
+                  Text(
+                    '${(progressPct * 100).toInt()}%',
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: AppTheme.primaryColor,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '$completedCount of $totalVideos Videos Watched',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+                ),
+              ),
+              const SizedBox(height: 12),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: progressPct,
+                  minHeight: 5,
+                  backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.black.withOpacity(0.06),
+                  valueColor: const AlwaysStoppedAnimation<Color>(AppTheme.primaryColor),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // Playlist items
+        ...widget.allCourseVideos.map((video) {
+          final isCurrent = video.id == _currentVideo.id;
+          final isCompleted = _progressMap[video.id]?['completed'] == true;
+          final savedPos = (_progressMap[video.id]?['lastPosition'] as num?)?.toInt() ?? 0;
+          final dur = (_progressMap[video.id]?['duration'] as num?)?.toInt() ?? 0;
+
+          return Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            child: GestureDetector(
+              onTap: () => _switchVideo(video),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: isCurrent
+                      ? (isDark ? const Color(0xFF132238) : AppTheme.primaryColor.withOpacity(0.08))
+                      : (isDark ? const Color(0xFF111827) : AppTheme.lightCard),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: isCurrent
+                        ? AppTheme.primaryColor
+                        : (isDark ? const Color(0xFF1E293B) : AppTheme.lightBorder),
+                    width: isCurrent ? 1.5 : 1,
+                  ),
+                ),
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  children: [
+                    // Video Thumbnail with Overlay
+                    Container(
+                      width: 90,
+                      height: 56,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0F172A),
+                        borderRadius: BorderRadius.circular(10),
+                        image: const DecorationImage(
+                          image: AssetImage('assets/images/video_placeholder.png'),
+                          fit: BoxFit.cover,
+                          onError: _suppressImageError,
+                        ),
+                      ),
+                      child: Stack(
+                        children: [
+                          Container(
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(0.4),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          if (isCompleted)
+                            const Center(
+                              child: Icon(
+                                Icons.check_circle_rounded,
+                                color: Color(0xFF10B981),
+                                size: 26,
+                              ),
+                            )
+                          else if (isCurrent)
+                            Positioned(
+                              top: 6,
+                              left: 6,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.primaryColor,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: const Text(
+                                  'PLAYING',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 8,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          if (!isCurrent && dur > 0)
+                            Positioned(
+                              bottom: 4,
+                              right: 6,
+                              child: Text(
+                                _formatDuration(dur),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+
+                    // Title & Progress
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            video.title,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: isCurrent
+                                  ? AppTheme.primaryColor
+                                  : (isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary),
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            isCompleted
+                                ? 'Completed'
+                                : (isCurrent
+                                    ? '${_formatDuration(_currentPosition)} / ${_formatDuration(_totalDuration)}'
+                                    : (savedPos > 0
+                                        ? '${_formatDuration(savedPos)} watched'
+                                        : 'Not started')),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }),
+      ],
+    );
+  }
+
+  static void _suppressImageError(Object exception, StackTrace? stackTrace) {}
+
+  // ─── 2. Transcript Tab ─────────────────────────────────────────────────
+
+  Widget _buildTranscriptTab(bool isDark, ThemeData theme) {
+    final transcript = _currentVideo.description.isNotEmpty
+        ? _currentVideo.description
+        : 'This lecture covers the foundational theory, algorithms, and practical applications for ${widget.course.name}.\n\nFollow along with the video slides and lecture notes attached in the Resources section.';
+
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: isDark ? AppTheme.darkSurface : AppTheme.lightCard,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Lecture Overview & Transcript',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                transcript,
+                style: TextStyle(
+                  fontSize: 14,
+                  height: 1.5,
+                  color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ─── 3. Comments Tab ───────────────────────────────────────────────────
+
+  Widget _buildCommentsTab(bool isDark, ThemeData theme) {
     return Column(
       children: [
         Expanded(
@@ -897,37 +1382,39 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
                   ? Center(
                       child: Text(
                         'No comments yet. Start the discussion!',
-                        style: theme.textTheme.bodyMedium,
+                        style: TextStyle(
+                          color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+                        ),
                       ),
                     )
                   : ListView.builder(
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(20),
                       itemCount: _comments.length,
                       itemBuilder: (context, index) {
                         final c = _comments[index];
                         return Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
+                          padding: const EdgeInsets.only(bottom: 14),
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               CircleAvatar(
-                                radius: 16,
-                                backgroundColor: AppTheme.primaryColor,
+                                radius: 18,
+                                backgroundColor: AppTheme.primaryColor.withOpacity(0.2),
                                 backgroundImage: c.userPhoto.isNotEmpty
                                     ? NetworkImage(c.userPhoto)
                                     : null,
                                 child: c.userPhoto.isEmpty
                                     ? Text(
-                                        c.userName[0].toUpperCase(),
+                                        c.userName.isNotEmpty ? c.userName[0].toUpperCase() : 'S',
                                         style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 12,
+                                          color: AppTheme.primaryColor,
+                                          fontSize: 13,
                                           fontWeight: FontWeight.bold,
                                         ),
                                       )
                                     : null,
                               ),
-                              const SizedBox(width: 10),
+                              const SizedBox(width: 12),
                               Expanded(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -937,24 +1424,28 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
                                       children: [
                                         Text(
                                           c.userName,
-                                          style: theme.textTheme.bodyMedium?.copyWith(
+                                          style: TextStyle(
                                             fontWeight: FontWeight.bold,
                                             fontSize: 13,
+                                            color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
                                           ),
                                         ),
                                         Text(
                                           DateFormat('MMM d, h:mm a').format(c.createdAt),
-                                          style: theme.textTheme.bodyMedium?.copyWith(
-                                            fontSize: 10,
-                                            color: theme.disabledColor,
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
                                           ),
                                         ),
                                       ],
                                     ),
-                                    const SizedBox(height: 3),
+                                    const SizedBox(height: 4),
                                     Text(
                                       c.comment,
-                                      style: theme.textTheme.bodyMedium?.copyWith(fontSize: 13),
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+                                      ),
                                     ),
                                   ],
                                 ),
@@ -965,21 +1456,38 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
                       },
                     ),
         ),
+        // Comment input bar
         Container(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           decoration: BoxDecoration(
-            color: Theme.of(context).cardColor,
-            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 4)],
+            color: isDark ? const Color(0xFF131B2A) : AppTheme.lightCard,
+            border: Border(
+              top: BorderSide(color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder),
+            ),
           ),
           child: Row(
             children: [
               Expanded(
                 child: TextField(
                   controller: _commentController,
-                  decoration: const InputDecoration(
+                  style: TextStyle(
+                    color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+                    fontSize: 13,
+                  ),
+                  decoration: InputDecoration(
                     hintText: 'Ask a question or leave a comment...',
+                    hintStyle: TextStyle(
+                      color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+                      fontSize: 13,
+                    ),
                     isDense: true,
-                    contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    filled: true,
+                    fillColor: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(20),
+                      borderSide: BorderSide.none,
+                    ),
                   ),
                 ),
               ),
@@ -995,167 +1503,141 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
     );
   }
 
-  // ─── 3. Reviews Tab ────────────────────────────────────────────────────
-  Widget _buildReviewsTab() {
-    final theme = Theme.of(context);
-    return _loadingRatings
-        ? const Center(child: CircularProgressIndicator(color: AppTheme.primaryColor))
-        : _ratings.isEmpty
-            ? Center(
+  // ─── 4. Bookmarks Tab ──────────────────────────────────────────────────
+
+  Widget _buildBookmarksTab(bool isDark, ThemeData theme) {
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: isDark ? AppTheme.darkSurface : AppTheme.lightCard,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                _isBookmarked ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
+                color: _isBookmarked ? AppTheme.primaryColor : Colors.grey,
+                size: 28,
+              ),
+              const SizedBox(width: 14),
+              Expanded(
                 child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(Icons.star_outline_rounded, size: 48, color: Colors.amber),
-                    const SizedBox(height: 8),
-                    Text('No reviews yet for this video.', style: theme.textTheme.bodyMedium),
-                    const SizedBox(height: 12),
-                    ElevatedButton.icon(
-                      onPressed: () {
-                        MaterialRatingSheet.show(
-                          context,
-                          _currentVideo,
-                          onRatingChanged: _loadRatings,
-                        );
-                      },
-                      icon: const Icon(Icons.rate_review_rounded, size: 16),
-                      label: const Text('Be the first to review'),
+                    Text(
+                      _isBookmarked ? 'Video is Bookmarked' : 'Save for Later',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                        color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      _isBookmarked
+                          ? 'This video is in your Saved Library for quick access.'
+                          : 'Tap bookmark to save this video to your library.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+                      ),
                     ),
                   ],
                 ),
-              )
-            : ListView.builder(
-                padding: const EdgeInsets.all(16),
-                itemCount: _ratings.length,
-                itemBuilder: (context, index) {
-                  final r = _ratings[index];
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 10),
-                    child: GlassCard(
-                      padding: const EdgeInsets.all(12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                r.ratedByName.isNotEmpty ? r.ratedByName : 'Student',
-                                style: theme.textTheme.bodyMedium
-                                    ?.copyWith(fontWeight: FontWeight.bold),
-                              ),
-                              Row(
-                                children: List.generate(
-                                  5,
-                                  (i) => Icon(
-                                    i < r.stars
-                                        ? Icons.star_rounded
-                                        : Icons.star_border_rounded,
-                                    color: Colors.amber,
-                                    size: 14,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          if (r.review.isNotEmpty) ...[
-                            const SizedBox(height: 6),
-                            Text(
-                              r.review,
-                              style: theme.textTheme.bodyMedium?.copyWith(fontSize: 13),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                  );
-                },
-              );
+              ),
+              ElevatedButton(
+                onPressed: _toggleBookmark,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _isBookmarked ? const Color(0xFFEF4444) : AppTheme.primaryColor,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                ),
+                child: Text(
+                  _isBookmarked ? 'Remove' : 'Save',
+                  style: const TextStyle(color: Colors.white, fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
   }
 
-  // ─── 4. Resources Tab ──────────────────────────────────────────────────
-  Widget _buildResourcesTab() {
-    final theme = Theme.of(context);
-    final resources = widget.courseResources;
+  // ─── Bottom Sticky Bar (UP NEXT / Continue) ───────────────────────────
 
-    return resources.isEmpty
-        ? Center(
+  Widget _buildBottomStickyBar(MaterialModel? nextVideo, bool isDark, ThemeData theme) {
+    final nextTitle = nextVideo?.title ?? 'Next Lecture';
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF0F172A) : Colors.white,
+        border: Border(
+          top: BorderSide(
+            color: isDark ? const Color(0xFF1E293B) : AppTheme.lightBorder,
+          ),
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
             child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.folder_open_rounded, size: 48, color: theme.disabledColor),
-                const SizedBox(height: 8),
+                const Text(
+                  'UP NEXT',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.1,
+                    color: Color(0xFF94A3B8),
+                  ),
+                ),
+                const SizedBox(height: 2),
                 Text(
-                  'No additional slides or PDFs for this course.',
-                  style: theme.textTheme.bodyMedium,
+                  nextTitle,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),
-          )
-        : ListView.builder(
-            padding: const EdgeInsets.all(16),
-            itemCount: resources.length,
-            itemBuilder: (context, index) {
-              final mat = resources[index];
-              final isPdf = mat.isPdf;
-              return Container(
-                margin: const EdgeInsets.only(bottom: 10),
-                child: GlassCard(
-                  padding: const EdgeInsets.all(14),
-                  child: Row(
-                    children: [
-                      Icon(
-                        isPdf
-                            ? Icons.picture_as_pdf_rounded
-                            : (mat.type == 'assignment'
-                                ? Icons.task_rounded
-                                : Icons.description_rounded),
-                        color: isPdf ? Colors.redAccent : AppTheme.primaryColor,
-                        size: 28,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              mat.title,
-                              style: theme.textTheme.bodyMedium
-                                  ?.copyWith(fontWeight: FontWeight.bold),
-                            ),
-                            Text(
-                              '${mat.type.toUpperCase()} • ${mat.contributorName}',
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                fontSize: 11,
-                                color: theme.disabledColor,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        ),
-                        onPressed: () {
-                          if (isPdf && mat.fileUrl != null) {
-                            Navigator.of(context).push(MaterialPageRoute(
-                              builder: (_) => PdfViewerScreen(
-                                url: mat.fileUrl!,
-                                title: mat.title,
-                              ),
-                            ));
-                          } else {
-                            _openUrl(mat.fileUrl);
-                          }
-                        },
-                        child: const Text('Open', style: TextStyle(fontSize: 12)),
-                      ),
-                    ],
-                  ),
-                ),
-              );
+          ),
+          const SizedBox(width: 16),
+          ElevatedButton.icon(
+            onPressed: () {
+              if (nextVideo != null) {
+                _switchVideo(nextVideo);
+              }
             },
-          );
+            icon: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 20),
+            label: const Text(
+              'Continue',
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.primaryColor,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24),
+              ),
+              elevation: 4,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

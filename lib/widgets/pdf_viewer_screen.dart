@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:edushare/core/theme.dart';
+import 'package:edushare/core/services/firestore_service.dart';
 
 /// Full-screen in-app PDF viewer.
 ///
@@ -14,11 +15,13 @@ import 'package:edushare/core/theme.dart';
 class PdfViewerScreen extends StatefulWidget {
   final String url;
   final String title;
+  final String? materialId;
 
   const PdfViewerScreen({
     Key? key,
     required this.url,
     required this.title,
+    this.materialId,
   }) : super(key: key);
 
   @override
@@ -26,6 +29,7 @@ class PdfViewerScreen extends StatefulWidget {
 }
 
 class _PdfViewerScreenState extends State<PdfViewerScreen> {
+  final FirestoreService _firestoreService = FirestoreService();
   bool _isLoading = true;
   bool _hasError = false;
   String? _errorMessage;
@@ -36,7 +40,14 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   @override
   void initState() {
     super.initState();
+    _recordView();
     _downloadPdf();
+  }
+
+  void _recordView() {
+    if (widget.materialId != null && widget.materialId!.isNotEmpty) {
+      _firestoreService.incrementMaterialView(widget.materialId!);
+    }
   }
 
   Future<void> _downloadPdf() async {
@@ -81,6 +92,9 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   }
 
   Future<void> _openExternally() async {
+    if (widget.materialId != null && widget.materialId!.isNotEmpty) {
+      _firestoreService.incrementMaterialDownload(widget.materialId!);
+    }
     final uri = Uri.parse(widget.url);
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);

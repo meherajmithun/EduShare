@@ -14,7 +14,6 @@ import 'package:edushare/views/admin/approvals_screen.dart';
 import 'package:edushare/views/admin/all_materials_screen.dart';
 import 'package:edushare/views/admin/users_screen.dart';
 import 'package:edushare/views/admin/faculty_admins_screen.dart';
-import 'package:edushare/views/admin/manage_courses_screen.dart';
 import 'package:edushare/views/profile/profile_screen.dart';
 
 // ─── Colour tokens (matching Figma dark palette) ─────────────────────────────
@@ -716,11 +715,10 @@ class _SuperAdminDashboard extends StatelessWidget {
                           const SizedBox(width: 10),
                           _QuickActionTile(
                             icon: Icons.add_circle_outline_rounded,
-                            label: 'Add\nCourse',
+                            label: 'Add\nDepartment',
                             color: AppTheme.primaryColor,
                             isDark: isDark,
-                            onTap: () => Navigator.of(context).push(
-                                MaterialPageRoute(builder: (_) => const ManageCoursesScreen())),
+                            onTap: () => _showAddDeptDialog(context),
                           ),
                           const SizedBox(width: 10),
                           _QuickActionTile(
@@ -975,6 +973,127 @@ class _SuperAdminDashboard extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Future<void> _showAddDeptDialog(BuildContext context) async {
+    final nameCtrl = TextEditingController();
+    final codeCtrl = TextEditingController();
+    final descCtrl = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    bool isSaving = false;
+
+    await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          final theme = Theme.of(ctx);
+          final isDarkDialog = theme.brightness == Brightness.dark;
+
+          return AlertDialog(
+            backgroundColor: isDarkDialog ? AppTheme.darkCard : AppTheme.lightSurface,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: const Text('Add Department', style: TextStyle(fontWeight: FontWeight.bold)),
+            content: Form(
+              key: formKey,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextFormField(
+                      controller: nameCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Department Name *',
+                        hintText: 'e.g. Civil Engineering',
+                      ),
+                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Name is required' : null,
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: codeCtrl,
+                      textCapitalization: TextCapitalization.characters,
+                      decoration: const InputDecoration(
+                        labelText: 'Code *',
+                        hintText: 'e.g. CE',
+                      ),
+                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Code is required' : null,
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: descCtrl,
+                      maxLines: 2,
+                      decoration: const InputDecoration(
+                        labelText: 'Description (Optional)',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: isSaving ? null : () => Navigator.pop(ctx, false),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primaryColor,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                onPressed: isSaving
+                    ? null
+                    : () async {
+                        if (!formKey.currentState!.validate()) return;
+                        setDialogState(() => isSaving = true);
+                        try {
+                          await service.createDepartmentAdmin(
+                            name: nameCtrl.text.trim(),
+                            code: codeCtrl.text.trim().toUpperCase(),
+                            description: descCtrl.text.trim(),
+                          );
+                          if (ctx.mounted) Navigator.pop(ctx, true);
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Department "${nameCtrl.text.trim()}" created successfully.'),
+                                backgroundColor: const Color(0xFF10B981),
+                                behavior: SnackBarBehavior.floating,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                            );
+                            onRefresh();
+                          }
+                        } catch (e) {
+                          setDialogState(() => isSaving = false);
+                          if (ctx.mounted) {
+                            ScaffoldMessenger.of(ctx).showSnackBar(
+                              SnackBar(
+                                content: Text('Failed to create department: $e'),
+                                backgroundColor: const Color(0xFFEF4444),
+                                behavior: SnackBarBehavior.floating,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                            );
+                          }
+                        }
+                      },
+                child: isSaving
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                      )
+                    : const Text('Create', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    nameCtrl.dispose();
+    codeCtrl.dispose();
+    descCtrl.dispose();
   }
 
   Widget _sectionLabel(BuildContext context, String label) {

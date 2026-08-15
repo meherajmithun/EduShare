@@ -7,7 +7,8 @@ import 'package:edushare/views/course/video_details_screen.dart';
 import 'package:edushare/widgets/glass_card.dart';
 
 class WatchHistoryScreen extends StatefulWidget {
-  const WatchHistoryScreen({Key? key}) : super(key: key);
+  final int initialTab;
+  const WatchHistoryScreen({Key? key, this.initialTab = 0}) : super(key: key);
 
   @override
   State<WatchHistoryScreen> createState() => _WatchHistoryScreenState();
@@ -26,7 +27,11 @@ class _WatchHistoryScreenState extends State<WatchHistoryScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(
+      length: 3,
+      vsync: this,
+      initialIndex: widget.initialTab.clamp(0, 2),
+    );
     _loadData();
   }
 

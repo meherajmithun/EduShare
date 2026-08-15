@@ -187,6 +187,12 @@ const materialSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    // Download counter for materials
+    downloads: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
   },
   {
     timestamps: true, // createdAt + updatedAt

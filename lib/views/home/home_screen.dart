@@ -8,11 +8,13 @@ import 'package:edushare/core/services/firestore_service.dart';
 import 'package:edushare/models/department_model.dart';
 import 'package:edushare/models/course_model.dart';
 import 'package:edushare/models/material_model.dart';
+import 'package:edushare/models/student_course_progress_model.dart';
 import 'package:edushare/models/user_model.dart';
 import 'package:edushare/widgets/notification_bell.dart';
 import 'package:edushare/views/course/course_details_screen.dart';
 import 'package:edushare/views/course/video_details_screen.dart';
 import 'package:edushare/views/course/watch_history_screen.dart';
+import 'package:edushare/views/course/completed_courses_screen.dart';
 import 'package:edushare/views/home/search_screen.dart';
 import 'package:edushare/views/bookmarks/saved_resources_screen.dart';
 import 'package:edushare/widgets/pdf_viewer_screen.dart';
@@ -31,6 +33,8 @@ class _HomeScreenState extends State<HomeScreen> {
   List<CourseModel> _allCourses = [];
   List<CourseModel> _filteredCourses = [];
   List<MaterialModel> _trendingMaterials = [];
+  List<StudentCourseProgressModel> _continueLearning = [];
+  List<StudentCourseProgressModel> _completedCourses = [];
   bool _isLoading = true;
   DepartmentModel? _selectedDept;
 
@@ -68,12 +72,23 @@ class _HomeScreenState extends State<HomeScreen> {
       // Sort trending by views descending
       approved.sort((a, b) => b.views.compareTo(a.views));
 
+      // Load real student learning progress (continue learning & completed courses)
+      final progressData = await _firestoreService.getStudentLearningProgress();
+      final contList = (progressData['continueLearning'] as List<dynamic>? ?? [])
+          .map((e) => StudentCourseProgressModel.fromJson(e as Map<String, dynamic>))
+          .toList();
+      final compList = (progressData['completedCourses'] as List<dynamic>? ?? [])
+          .map((e) => StudentCourseProgressModel.fromJson(e as Map<String, dynamic>))
+          .toList();
+
       if (mounted) {
         setState(() {
           _departments = depts;
           _allCourses = courses;
           _filteredCourses = courses;
           _trendingMaterials = approved.take(10).toList();
+          _continueLearning = contList;
+          _completedCourses = compList;
           _isLoading = false;
         });
       }
@@ -84,6 +99,8 @@ class _HomeScreenState extends State<HomeScreen> {
           _allCourses = [];
           _filteredCourses = [];
           _trendingMaterials = [];
+          _continueLearning = [];
+          _completedCourses = [];
           _isLoading = false;
         });
       }
@@ -101,6 +118,55 @@ class _HomeScreenState extends State<HomeScreen> {
             .toList();
       }
     });
+  }
+
+  void _openContinueLearningCourse(StudentCourseProgressModel item) async {
+    final course = CourseModel(
+      id: item.id,
+      name: item.name,
+      code: item.code,
+      departmentId: item.departmentId,
+    );
+
+    // Fetch all videos for this course
+    final allVideos = await _firestoreService.getApprovedMaterials(course.id, type: 'video');
+    final allNotes = await _firestoreService.getApprovedMaterials(course.id, type: 'notes');
+    final allAssignments = await _firestoreService.getApprovedMaterials(course.id, type: 'assignment');
+
+    if (!mounted) return;
+
+    if (allVideos.isNotEmpty) {
+      // Find the specific last watched video or fallback to first
+      MaterialModel initialVideo = allVideos.first;
+      if (item.lastWatchedVideoId != null && item.lastWatchedVideoId!.isNotEmpty) {
+        final found = allVideos.where((v) => v.id == item.lastWatchedVideoId);
+        if (found.isNotEmpty) {
+          initialVideo = found.first;
+        }
+      }
+
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => VideoDetailsScreen(
+            course: course,
+            allCourseVideos: allVideos,
+            initialVideo: initialVideo,
+            courseResources: [...allNotes, ...allAssignments],
+          ),
+        ),
+      );
+    } else {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => CourseDetailsScreen(course: course),
+        ),
+      );
+    }
+
+    if (mounted) {
+      _loadData();
+      context.read<UserStatsProvider>().refresh(force: true);
+    }
   }
 
   void _launchMaterial(MaterialModel m) {
@@ -126,6 +192,7 @@ class _HomeScreenState extends State<HomeScreen> {
           builder: (_) => PdfViewerScreen(
             url: m.fileUrl!,
             title: m.title,
+            materialId: m.id,
           ),
         ),
       );
@@ -442,20 +509,68 @@ class _HomeScreenState extends State<HomeScreen> {
                           child: _MetricCard(
                             icon: Icons.check_circle_outline_rounded,
                             iconColor: const Color(0xFF8B5CF6),
-                            count: stats.isLoading ? '–' : '${stats.completed}',
+                            count: stats.isLoading ? '–' : '${_completedCourses.isNotEmpty ? _completedCourses.length : stats.completed}',
                             label: 'COMPLETED',
                             isDark: isDark,
                             onTap: () {
                               Navigator.of(context).push(
                                 MaterialPageRoute(
-                                    builder: (_) => const WatchHistoryScreen()),
-                              );
+                                    builder: (_) => const CompletedCoursesScreen()),
+                              ).then((_) {
+                                _loadData();
+                                if (mounted) context.read<UserStatsProvider>().refresh(force: true);
+                              });
                             },
                           ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 24),
+
+                    // ── Continue Learning Section (Real backend in-progress courses) ──
+                    if (_continueLearning.isNotEmpty) ...[
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            'Continue Learning',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: isDark
+                                  ? AppTheme.darkTextPrimary
+                                  : AppTheme.lightTextPrimary,
+                            ),
+                          ),
+                          GestureDetector(
+                            onTap: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                    builder: (_) => const WatchHistoryScreen()),
+                              ).then((_) {
+                                _loadData();
+                                if (mounted) context.read<UserStatsProvider>().refresh(force: true);
+                              });
+                            },
+                            child: const Text(
+                              'View All',
+                              style: TextStyle(
+                                color: AppTheme.primaryColor,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      ..._continueLearning.take(3).map((item) => _ContinueLearningCard(
+                            progress: item,
+                            isDark: isDark,
+                            onTap: () => _openContinueLearningCourse(item),
+                          )),
+                      const SizedBox(height: 24),
+                    ],
 
                     // ── Available Courses Section ───────────────────────────
                     Row(
@@ -922,3 +1037,116 @@ class _EmptyState extends StatelessWidget {
     );
   }
 }
+
+class _ContinueLearningCard extends StatelessWidget {
+  final StudentCourseProgressModel progress;
+  final bool isDark;
+  final VoidCallback onTap;
+
+  const _ContinueLearningCard({
+    required this.progress,
+    required this.isDark,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final pct = (progress.progressPercentage.clamp(0, 100)) / 100.0;
+
+    final isCode = progress.code.toLowerCase().contains('cse') ||
+        progress.name.toLowerCase().contains('code') ||
+        progress.name.toLowerCase().contains('program') ||
+        progress.name.toLowerCase().contains('structure') ||
+        progress.name.toLowerCase().contains('algorithm');
+
+    final icon = isCode ? Icons.code_rounded : Icons.storage_rounded;
+    final iconBg = isCode ? const Color(0xFFEF4444).withOpacity(0.15) : const Color(0xFF3B82F6).withOpacity(0.15);
+    final iconColor = isCode ? const Color(0xFFEF4444) : const Color(0xFF3B82F6);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          decoration: BoxDecoration(
+            color: isDark ? AppTheme.darkSurface : AppTheme.lightCard,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
+            ),
+          ),
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: iconBg,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Center(
+                      child: Icon(icon, color: iconColor, size: 22),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          progress.name,
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                            color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          progress.instructor,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  Text(
+                    '${progress.progressPercentage}%',
+                    style: const TextStyle(
+                      color: AppTheme.primaryColor,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              // Linear progress bar
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: pct,
+                  minHeight: 5,
+                  backgroundColor: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.06),
+                  valueColor: const AlwaysStoppedAnimation<Color>(AppTheme.primaryColor),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+

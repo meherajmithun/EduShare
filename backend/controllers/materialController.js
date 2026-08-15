@@ -24,6 +24,7 @@ const Material = require('../models/Material');
 const MaterialRating = require('../models/MaterialRating');
 const User = require('../models/User');
 const Department = require('../models/Department');
+const Course = require('../models/Course');
 const { uploadBuffer, uploadVideoBuffer, deleteFile } = require('../services/cloudinaryService');
 const { notifyFacultyAdminOnUpload, notifyContributorOnRatingSubmitted, notifyContributorOnRatingUpdated } = require('../services/notificationService');
 const { success, createError } = require('../utils/apiResponse');
@@ -150,6 +151,18 @@ const createMaterial = async (req, res) => {
     if (req.user.departmentId.toString() !== departmentId.toString()) {
       throw createError('You can only upload materials for your own department.', 403);
     }
+  }
+
+  // Course validation: verify course exists, belongs to department, and is active
+  const course = await Course.findById(courseId);
+  if (!course) {
+    throw createError('Selected course not found.', 404);
+  }
+  if (course.departmentId && course.departmentId.toString() !== departmentId.toString()) {
+    throw createError('Selected course does not belong to the chosen department.', 400);
+  }
+  if (course.status !== 'active') {
+    throw createError('Cannot upload materials to an inactive course.', 400);
   }
 
   // Resolve department name
@@ -353,6 +366,30 @@ const deleteMaterialRating = async (req, res) => {
   res.json(success(null, 'Rating deleted successfully.'));
 };
 
+// ─── POST /api/materials/:id/view ─────────────────────────────────────
+const incrementMaterialView = async (req, res) => {
+  const { id } = req.params;
+  const material = await Material.findByIdAndUpdate(
+    id,
+    { $inc: { views: 1 } },
+    { new: true }
+  );
+  if (!material) throw createError('Material not found', 404);
+  res.json(success({ views: material.views }, 'Material view recorded.'));
+};
+
+// ─── POST /api/materials/:id/download ─────────────────────────────────
+const incrementMaterialDownload = async (req, res) => {
+  const { id } = req.params;
+  const material = await Material.findByIdAndUpdate(
+    id,
+    { $inc: { downloads: 1 } },
+    { new: true }
+  );
+  if (!material) throw createError('Material not found', 404);
+  res.json(success({ downloads: material.downloads }, 'Material download recorded.'));
+};
+
 module.exports = {
   getMaterials,
   getMyMaterials,
@@ -363,4 +400,6 @@ module.exports = {
   addMaterialRating,
   updateMaterialRating,
   deleteMaterialRating,
+  incrementMaterialView,
+  incrementMaterialDownload,
 };

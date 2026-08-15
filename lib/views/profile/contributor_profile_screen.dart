@@ -337,7 +337,11 @@ class _ContributorProfileScreenState extends State<ContributorProfileScreen>
     } else if (m.isPdf && m.fileUrl != null && m.fileUrl!.isNotEmpty) {
       if (mounted) {
         Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => PdfViewerScreen(url: m.fileUrl!, title: m.title),
+          builder: (_) => PdfViewerScreen(
+            url: m.fileUrl!,
+            title: m.title,
+            materialId: m.id,
+          ),
         ));
       }
     } else if (m.fileUrl != null && m.fileUrl!.isNotEmpty) {

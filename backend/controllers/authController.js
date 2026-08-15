@@ -47,9 +47,9 @@ const SELF_REGISTER_ROLES = ['student', 'contributor', 'admin', 'faculty_admin']
 //   status = 'pending' → no JWT issued → Super Admin notified.
 //   Student workflow: status = 'active' → JWT issued immediately.
 const register = async (req, res) => {
-  const { name, email, password, role, department, facultyId, designation, studentId } = req.body;
+  const { name, email, password, role, department, departmentId, facultyId, designation, studentId } = req.body;
 
-  if (!name || !email || !password || !role || !department) {
+  if (!name || !email || !password || !role || (!department && !departmentId)) {
     throw createError('All fields are required: name, email, password, role, department.', 400);
   }
 
@@ -74,6 +74,19 @@ const register = async (req, res) => {
     throw createError('An account with this email already exists. Please log in instead.', 409);
   }
 
+  // Resolve Department
+  let resolvedDept = null;
+  if (departmentId) {
+    resolvedDept = await Department.findById(departmentId);
+  }
+  if (!resolvedDept && department) {
+    const escaped = department.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    resolvedDept = await Department.findOne({ name: new RegExp('^' + escaped + '$', 'i') });
+  }
+
+  const effectiveDeptName = resolvedDept ? resolvedDept.name : (department ? department.trim() : '');
+  const effectiveDeptId = resolvedDept ? resolvedDept._id : null;
+
   // Student ID uniqueness check (students only)
   if (role === 'student' && studentId && studentId.trim()) {
     const existingStudentId = await User.findOne({ studentId: studentId.trim() });
@@ -89,15 +102,19 @@ const register = async (req, res) => {
       email,
       password,
       role: 'contributor',
-      department,
+      department: effectiveDeptName,
+      departmentId: effectiveDeptId,
       status: 'pending', // Blocked until Faculty Admin approves
     });
 
-    // Find the active Faculty Admin for this department (by name match)
+    // Find the active Faculty Admin for this department (by ID or name match)
     const facultyAdmin = await User.findOne({
       role: { $in: ['faculty_admin', 'admin'] },
       status: 'active',
-      department,
+      $or: [
+        ...(effectiveDeptId ? [{ departmentId: effectiveDeptId }] : []),
+        { department: effectiveDeptName },
+      ],
     });
 
     // Notify Faculty Admin (fire-and-forget)
@@ -113,17 +130,13 @@ const register = async (req, res) => {
 
   // ── Admin / Faculty Admin → pending approval ──────────────────────────────
   if (role === 'admin' || role === 'faculty_admin') {
-    let deptId = null;
-    if (department) {
-      const escaped = department.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      let dept = await Department.findOne({ name: new RegExp('^' + escaped + '$', 'i') });
-      if (!dept) {
-        dept = await Department.create({
-          name: department.trim(),
-          code: department.trim().substring(0, 4).toUpperCase().replace(/[^A-Z]/gi, '') || 'DEPT',
-        });
-      }
-      deptId = dept._id;
+    let adminDeptId = effectiveDeptId;
+    if (!adminDeptId && effectiveDeptName) {
+      let dept = await Department.create({
+        name: effectiveDeptName,
+        code: effectiveDeptName.substring(0, 4).toUpperCase().replace(/[^A-Z]/gi, '') || 'DEPT',
+      });
+      adminDeptId = dept._id;
     }
 
     const adminUser = await User.create({
@@ -131,8 +144,8 @@ const register = async (req, res) => {
       email,
       password,
       role: 'faculty_admin',
-      department: department.trim(),
-      departmentId: deptId,
+      department: effectiveDeptName,
+      departmentId: adminDeptId,
       facultyId: facultyId || '',
       designation: designation || '',
       status: 'pending', // Blocked until Super Admin approves
@@ -150,20 +163,13 @@ const register = async (req, res) => {
   }
 
   // ── Student → active immediately ───────────────────────────────────────
-  let studentDeptId = null;
-  if (department) {
-    const escaped = department.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    let dept = await Department.findOne({ name: new RegExp('^' + escaped + '$', 'i') });
-    if (dept) studentDeptId = dept._id;
-  }
-
   const user = await User.create({
     name,
     email,
     password,
     role,
-    department: department.trim(),
-    departmentId: studentDeptId,
+    department: effectiveDeptName,
+    departmentId: effectiveDeptId,
     status: 'active',
     // Save Student ID if provided (students only)
     studentId: (role === 'student' && studentId && studentId.trim()) ? studentId.trim() : null,
@@ -202,6 +208,9 @@ const registerFacultyAdmin = async (req, res) => {
   const dept = await Department.findById(departmentId);
   if (!dept) {
     throw createError('Selected department not found.', 404);
+  }
+  if (!dept.isActive) {
+    throw createError('The selected department is currently inactive. Please choose an active department.', 400);
   }
 
   const existing = await User.findOne({ email: email.toLowerCase().trim() });

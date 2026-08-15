@@ -14,6 +14,7 @@ import 'package:edushare/core/services/auth_service.dart';
 import 'package:edushare/core/services/firestore_service.dart';
 import 'package:edushare/core/services/notification_service.dart';
 import 'package:edushare/models/user_model.dart';
+import 'package:edushare/models/rating_model.dart';
 import 'package:edushare/widgets/glass_card.dart';
 import 'package:edushare/views/upload/upload_resource_screen.dart';
 import 'package:edushare/views/upload/my_uploads_screen.dart';
@@ -88,6 +89,265 @@ class _ContributorDashboardScreenState extends State<ContributorDashboardScreen>
     final raw = _stats?[key];
     if (raw is List) return raw;
     return <dynamic>[];
+  }
+
+  void _showReviewsSheet(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final user = context.read<AuthService>().currentUser;
+    final uid = user?.uid ?? '';
+    final avgRating = (_stats?['avgRating'] as num? ?? 0.0).toDouble();
+    final totalRatings = (_stats?['totalRatings'] as num? ?? 0).toInt();
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.65,
+        minChildSize: 0.4,
+        maxChildSize: 0.9,
+        builder: (_, scrollController) => Container(
+          decoration: BoxDecoration(
+            color: isDark ? AppTheme.darkBackground : AppTheme.lightBackground,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            children: [
+              const SizedBox(height: 12),
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: isDark ? Colors.white24 : Colors.black12,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Student Reviews & Ratings',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 18,
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded),
+                      onPressed: () => Navigator.pop(ctx),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: FutureBuilder<Map<String, dynamic>>(
+                  future: _service.getContributorRatings(uid),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(
+                        child: CircularProgressIndicator(color: AppTheme.primaryColor),
+                      );
+                    }
+
+                    final ratings = (snapshot.data?['ratings'] as List<RatingModel>?) ?? [];
+
+                    return ListView(
+                      controller: scrollController,
+                      padding: const EdgeInsets.all(20),
+                      children: [
+                        // Summary card
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: isDark ? AppTheme.darkSurface : AppTheme.lightCard,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Text(
+                                avgRating > 0 ? avgRating.toStringAsFixed(1) : '0.0',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 34,
+                                  color: isDark
+                                      ? AppTheme.darkTextPrimary
+                                      : AppTheme.lightTextPrimary,
+                                ),
+                              ),
+                              const SizedBox(width: 14),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: List.generate(5, (i) {
+                                        return Icon(
+                                          i < avgRating.floor()
+                                              ? Icons.star_rounded
+                                              : (i < avgRating
+                                                  ? Icons.star_half_rounded
+                                                  : Icons.star_outline_rounded),
+                                          color: const Color(0xFFF59E0B),
+                                          size: 18,
+                                        );
+                                      }),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      totalRatings == 0
+                                          ? 'No student ratings yet'
+                                          : 'Based on $totalRatings student ${totalRatings == 1 ? 'rating' : 'ratings'}',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: isDark
+                                            ? AppTheme.darkTextSecondary
+                                            : AppTheme.lightTextSecondary,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+
+                        if (ratings.isEmpty)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 40),
+                            child: Center(
+                              child: Column(
+                                children: [
+                                  Icon(
+                                    Icons.rate_review_outlined,
+                                    size: 48,
+                                    color: isDark ? Colors.white24 : Colors.black26,
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    'No Reviews Yet',
+                                    style: theme.textTheme.titleMedium?.copyWith(
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'When students review your materials or profile, they will appear here in real time.',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: isDark
+                                          ? AppTheme.darkTextSecondary
+                                          : AppTheme.lightTextSecondary,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          )
+                        else
+                          ...ratings.map((r) => _buildReviewItem(r, isDark, theme)),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildReviewItem(RatingModel rating, bool isDark, ThemeData theme) {
+    final initial = rating.ratedByName.isNotEmpty ? rating.ratedByName[0].toUpperCase() : 'S';
+    final dateStr = '${rating.createdAt.day} ${_monthName(rating.createdAt.month)} ${rating.createdAt.year}';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: isDark ? AppTheme.darkSurface : AppTheme.lightCard,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 16,
+                backgroundColor: AppTheme.primaryColor.withOpacity(0.15),
+                child: Text(
+                  initial,
+                  style: const TextStyle(
+                    color: AppTheme.primaryColor,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      rating.ratedByName,
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                    ),
+                    Text(
+                      dateStr,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Row(
+                children: List.generate(
+                  5,
+                  (i) => Icon(
+                    i < rating.stars ? Icons.star_rounded : Icons.star_outline_rounded,
+                    color: const Color(0xFFF59E0B),
+                    size: 15,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (rating.review.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text(
+              rating.review,
+              style: TextStyle(
+                fontSize: 13,
+                height: 1.4,
+                color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  static String _monthName(int month) {
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return (month >= 1 && month <= 12) ? months[month - 1] : '';
   }
 
   @override
@@ -255,16 +515,16 @@ class _ContributorDashboardScreenState extends State<ContributorDashboardScreen>
                                 label: 'Total Uploads',
                                 value: '${_stats?['totalUploads'] ?? 0}',
                                 subtitle: '+${_stats?['pendingUploads'] ?? 0} pending',
-                                onTap: () => _pushAndRefresh(const MyUploadsScreen()),
+                                onTap: () => _pushAndRefresh(const MyUploadsScreen(initialFilter: 'all')),
                               ),
                             ),
                             const SizedBox(width: 10),
                             Expanded(
                               child: _KeyStatCard(
                                 label: 'Total Views',
-                                value: _formatCount(_stats?['totalViews'] ?? _stats?['totalDownloads'] ?? 0),
+                                value: _formatCount(_stats?['totalViews'] ?? 0),
                                 subtitle: 'total views',
-                                onTap: () => _pushAndRefresh(const MyUploadsScreen()),
+                                onTap: () => _pushAndRefresh(const MyUploadsScreen(initialFilter: 'approved')),
                               ),
                             ),
                             const SizedBox(width: 10),
@@ -274,7 +534,7 @@ class _ContributorDashboardScreenState extends State<ContributorDashboardScreen>
                                 value: (_stats?['avgRating'] as num? ?? 0.0).toStringAsFixed(1),
                                 subtitle: '${_stats?['totalRatings'] ?? 0} reviews',
                                 showStar: true,
-                                onTap: () => _pushAndRefresh(const MyUploadsScreen()),
+                                onTap: () => _showReviewsSheet(context),
                               ),
                             ),
                           ],
@@ -305,7 +565,7 @@ class _ContributorDashboardScreenState extends State<ContributorDashboardScreen>
                             ),
                           ),
                           GestureDetector(
-                            onTap: () => _pushAndRefresh(const MyUploadsScreen()),
+                            onTap: () => _pushAndRefresh(const MyUploadsScreen(initialFilter: 'all')),
                             child: Text(
                               'Manage All',
                               style: TextStyle(

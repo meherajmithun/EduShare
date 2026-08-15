@@ -49,8 +49,8 @@ const recalcContributorRating = async (contributorId) => {
 // ─── GET /api/contributors/me/stats ───────────────────────────────────
 // Returns current contributor's dashboard stats.
 // Includes totalUploads, approvedUploads, pendingUploads, rejectedUploads,
-// totalDownloads (via views), avgRating, totalRatings, followerCount,
-// and 6-month monthly download breakdown.
+// totalDownloads, totalViews, avgRating, totalRatings, recentReviews,
+// followerCount, and 6-month monthly download/view breakdowns.
 const getMyContributorStats = async (req, res) => {
   const userId = req.user._id;
 
@@ -69,14 +69,42 @@ const getMyContributorStats = async (req, res) => {
     Follow.countDocuments({ following: userId }),
   ]);
 
-  // Total downloads = sum of views across all approved materials
-  const downloadAgg = await Material.aggregate([
+  // Total views = sum of views across all approved materials
+  const viewsAgg = await Material.aggregate([
     { $match: { uploadedBy: userId, approvalStatus: 'approved' } },
     { $group: { _id: null, totalViews: { $sum: '$views' } } },
   ]);
-  const totalDownloads = downloadAgg[0]?.totalViews ?? 0;
+  const totalViews = viewsAgg[0]?.totalViews ?? 0;
 
-  // Monthly breakdown for the last 6 months (views per month)
+  // Total downloads = sum of downloads across all approved materials
+  const downloadAgg = await Material.aggregate([
+    { $match: { uploadedBy: userId, approvalStatus: 'approved' } },
+    { $group: { _id: null, totalDownloads: { $sum: '$downloads' } } },
+  ]);
+  const totalDownloads = downloadAgg[0]?.totalDownloads ?? 0;
+
+  // Calculate live average rating and review count from MongoDB
+  const [ratingAgg] = await Rating.aggregate([
+    { $match: { contributor: userId } },
+    {
+      $group: {
+        _id: null,
+        avg: { $avg: '$stars' },
+        count: { $sum: 1 },
+      },
+    },
+  ]);
+
+  const user = (await User.findById(userId)) || req.user;
+  const avgRating = ratingAgg ? parseFloat(ratingAgg.avg.toFixed(1)) : (user.avgRating || 0);
+  const totalRatings = ratingAgg ? ratingAgg.count : (user.totalRatings || 0);
+
+  // Fetch recent student reviews for this contributor
+  const recentReviews = await Rating.find({ contributor: userId })
+    .sort({ createdAt: -1 })
+    .limit(20);
+
+  // Monthly breakdown for the last 6 months (downloads & views per month)
   const now = new Date();
   const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
 
@@ -94,7 +122,8 @@ const getMyContributorStats = async (req, res) => {
           year: { $year: '$createdAt' },
           month: { $month: '$createdAt' },
         },
-        downloads: { $sum: '$views' },
+        downloads: { $sum: '$downloads' },
+        views: { $sum: '$views' },
       },
     },
     { $sort: { '_id.year': 1, '_id.month': 1 } },
@@ -103,6 +132,7 @@ const getMyContributorStats = async (req, res) => {
   // Build full 6-month labels + values array
   const monthLabels = [];
   const monthDownloads = [];
+  const monthViews = [];
   for (let i = 5; i >= 0; i--) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     const year = d.getFullYear();
@@ -113,9 +143,8 @@ const getMyContributorStats = async (req, res) => {
     );
     monthLabels.push(label);
     monthDownloads.push(match?.downloads ?? 0);
+    monthViews.push(match?.views ?? 0);
   }
-
-  const user = (await User.findById(userId)) || req.user;
 
   res.json(
     success(
@@ -125,13 +154,23 @@ const getMyContributorStats = async (req, res) => {
         pendingUploads,
         rejectedUploads,
         totalDownloads,
-        totalViews: totalDownloads,
-        avgRating: user.avgRating || 0,
-        totalRatings: user.totalRatings || 0,
+        totalViews,
+        avgRating,
+        totalRatings,
+        recentReviews: recentReviews.map((r) => ({
+          id: r._id.toString(),
+          contributorId: r.contributor.toString(),
+          ratedById: r.ratedBy.toString(),
+          ratedByName: r.ratedByName || 'Anonymous Student',
+          stars: r.stars,
+          review: r.review || '',
+          createdAt: r.createdAt,
+          updatedAt: r.updatedAt,
+        })),
         followerCount,
         monthlyLabels: monthLabels,
         monthlyDownloads: monthDownloads,
-        monthlyViews: monthDownloads,
+        monthlyViews: monthViews,
       },
       'Contributor stats fetched.'
     )

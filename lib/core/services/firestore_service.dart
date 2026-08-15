@@ -497,7 +497,21 @@ class FirestoreService {
     await _api.delete('/api/materials/$materialId/ratings');
   }
 
-  // ─── Video Learning System ─────────────────────────────────────────────
+  // ─── Material & Video Tracking ─────────────────────────────────────────
+
+  /// Increment material view counter (PDFs, notes, assignments)
+  Future<void> incrementMaterialView(String materialId) async {
+    try {
+      await _api.post('/api/materials/$materialId/view', {});
+    } catch (_) {}
+  }
+
+  /// Increment material download counter
+  Future<void> incrementMaterialDownload(String materialId) async {
+    try {
+      await _api.post('/api/materials/$materialId/download', {});
+    } catch (_) {}
+  }
 
   /// Increment video view counter
   Future<void> incrementVideoView(String materialId) async {
@@ -523,6 +537,22 @@ class FirestoreService {
         'completed': completed,
       });
     } catch (_) {}
+  }
+
+  /// Fetch full student course learning progress (continue learning + completed courses)
+  Future<Map<String, dynamic>> getStudentLearningProgress() async {
+    try {
+      final data = await _api.get('/api/courses/learning-progress');
+      return data as Map<String, dynamic>;
+    } catch (_) {
+      return {
+        'continueLearning': [],
+        'completedCourses': [],
+        'completedCount': 0,
+        'downloads': 0,
+        'savedNotes': 0,
+      };
+    }
   }
 
   /// Fetch all video progress records for a course

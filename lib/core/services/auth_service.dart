@@ -267,6 +267,7 @@ class AuthService extends ChangeNotifier {
     required String password,
     required String department,
     required String role,
+    String? departmentId,
     String? studentId,
   }) async {
     final emailError = validateEmail(email);
@@ -285,6 +286,8 @@ class AuthService extends ChangeNotifier {
           'password': password,
           'role': role,
           'department': department,
+          if (departmentId != null && departmentId.trim().isNotEmpty)
+            'departmentId': departmentId.trim(),
           if (studentId != null && studentId.trim().isNotEmpty)
             'studentId': studentId.trim(),
         },

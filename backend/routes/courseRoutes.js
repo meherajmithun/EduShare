@@ -7,19 +7,23 @@ const {
   updateCourse,
   toggleCourseStatus,
   deleteCourse,
+  getStudentLearningProgress,
 } = require('../controllers/courseController');
 const { protect } = require('../middleware/auth');
 const roleGuard = require('../middleware/roleGuard');
+
+// Student learning progress — MUST be before /:id route
+router.get('/learning-progress', protect, getStudentLearningProgress);
 
 // Any authenticated user can browse courses (students, contributors, admins)
 router.get('/', protect, getCourses);
 router.get('/:id', protect, getCourseById);
 
-// Course management — faculty_admin (own dept), admin, super_admin
-const adminRoles = roleGuard('faculty_admin', 'admin', 'super_admin');
-router.post('/', protect, adminRoles, createCourse);
-router.put('/:id', protect, adminRoles, updateCourse);
-router.patch('/:id/status', protect, adminRoles, toggleCourseStatus);
-router.delete('/:id', protect, adminRoles, deleteCourse);
+// Course management — faculty_admin (own dept) and admin only. Super admin does not manage courses.
+const deptAdminRoles = roleGuard('faculty_admin', 'admin');
+router.post('/', protect, deptAdminRoles, createCourse);
+router.put('/:id', protect, deptAdminRoles, updateCourse);
+router.patch('/:id/status', protect, deptAdminRoles, toggleCourseStatus);
+router.delete('/:id', protect, deptAdminRoles, deleteCourse);
 
 module.exports = router;

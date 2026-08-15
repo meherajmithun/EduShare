@@ -10,6 +10,8 @@ const {
   addMaterialRating,
   updateMaterialRating,
   deleteMaterialRating,
+  incrementMaterialView,
+  incrementMaterialDownload,
 } = require('../controllers/materialController');
 const { protect } = require('../middleware/auth');
 const roleGuard = require('../middleware/roleGuard');
@@ -28,6 +30,10 @@ router.get(
 );
 router.get('/', protect, getMaterials);          // ?courseId=&type=
 router.get('/:id', protect, getMaterialById);
+
+// ─── View & Download counters ────────────────────────────────────────────
+router.post('/:id/view', protect, incrementMaterialView);
+router.post('/:id/download', protect, incrementMaterialDownload);
 
 // uploadMiddleware streams file to memory; controller decides Cloudinary resource_type
 router.post(

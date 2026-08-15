@@ -172,6 +172,7 @@ class _SavedResourcesScreenState extends State<SavedResourcesScreen> {
           builder: (_) => PdfViewerScreen(
             url: m.fileUrl!,
             title: m.title,
+            materialId: m.id,
           ),
         ),
       );

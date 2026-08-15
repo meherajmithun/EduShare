@@ -134,18 +134,20 @@ const deleteUser = async (req, res) => {
 
 // ─── GET /api/users/me/stats ──────────────────────────────────────────
 // Returns learning statistics for the currently logged-in user.
-// All roles can call this; stats are computed from VideoProgress & VideoBookmark.
+// All roles can call this; stats are computed from VideoProgress, Material, & VideoBookmark.
 const getMyStats = async (req, res) => {
   const userId = req.user._id;
 
-  const [progressRecords, bookmarks] = await Promise.all([
+  const { getStudentCourseProgressData } = require('./courseController');
+  const courseProgressData = await getStudentCourseProgressData(userId);
+
+  const [progressRecords] = await Promise.all([
     VideoProgress.find({ userId }),
-    VideoBookmark.find({ userId }),
   ]);
 
-  const completed = progressRecords.filter((p) => p.completed).length;
-  const downloads = progressRecords.length; // each progress entry = an engaged resource
-  const savedNotes = bookmarks.length;
+  const completed = courseProgressData.completedCount;
+  const downloads = courseProgressData.downloads;
+  const savedNotes = courseProgressData.savedNotes;
 
   // ── Weekly activity (last 7 days) ──────────────────────────────────
   // Derive approximate study hours from video watch time stored in lastPosition.
@@ -182,8 +184,14 @@ const getMyStats = async (req, res) => {
   const totalHours = weeklyActivity.reduce((acc, d) => acc + d.hours, 0);
 
   res.json(
-    require('../utils/apiResponse').success(
-      { downloads, savedNotes, completed, weeklyActivity, totalWeeklyHours: Math.round(totalHours * 10) / 10 },
+    success(
+      {
+        downloads,
+        savedNotes,
+        completed,
+        weeklyActivity,
+        totalWeeklyHours: Math.round(totalHours * 10) / 10,
+      },
       'Stats fetched successfully.'
     )
   );

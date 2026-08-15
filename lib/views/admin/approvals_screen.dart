@@ -107,6 +107,7 @@ class _ApprovalsScreenState extends State<ApprovalsScreen>
           builder: (_) => PdfViewerScreen(
             url: mat.fileUrl!,
             title: mat.title,
+            materialId: mat.id,
           ),
         ),
       );

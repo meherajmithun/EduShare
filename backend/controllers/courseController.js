@@ -13,10 +13,117 @@
 
 const Course = require('../models/Course');
 const Department = require('../models/Department');
+const Material = require('../models/Material');
+const VideoProgress = require('../models/VideoProgress');
+const VideoBookmark = require('../models/VideoBookmark');
 const { success, createError } = require('../utils/apiResponse');
+
+// ─── Helper: calculate student course progress and completions ─────────
+const getStudentCourseProgressData = async (userId) => {
+  const [progressRecords, bookmarks] = await Promise.all([
+    VideoProgress.find({ userId }).populate('materialId').populate('courseId'),
+    VideoBookmark.find({ userId }),
+  ]);
+
+  // Group progress records by courseId
+  const courseMap = {};
+  for (const prog of progressRecords) {
+    if (!prog.courseId || !prog.courseId._id) continue;
+    const cid = prog.courseId._id.toString();
+    if (!courseMap[cid]) {
+      courseMap[cid] = {
+        course: prog.courseId,
+        records: [],
+      };
+    }
+    courseMap[cid].records.push(prog);
+  }
+
+  const continueLearning = [];
+  const completedCourses = [];
+
+  for (const [cid, entry] of Object.entries(courseMap)) {
+    const course = entry.course;
+    // Find all approved materials/videos for this course
+    const allMaterials = await Material.find({ courseId: course._id, approvalStatus: 'approved' });
+    const totalMaterials = allMaterials.length;
+    if (totalMaterials === 0) continue;
+
+    // Calculate progress
+    let totalRatio = 0;
+    let completedCount = 0;
+    let lastWatchedAt = new Date(0);
+    let mostRecentRecord = null;
+
+    for (const mat of allMaterials) {
+      const rec = entry.records.find((r) => r.materialId && r.materialId._id.toString() === mat._id.toString());
+      if (rec) {
+        if (rec.lastWatchedAt && new Date(rec.lastWatchedAt) > lastWatchedAt) {
+          lastWatchedAt = new Date(rec.lastWatchedAt);
+          mostRecentRecord = rec;
+        }
+        if (rec.completed) {
+          completedCount++;
+          totalRatio += 1.0;
+        } else if (rec.duration > 0 && rec.lastPosition > 0) {
+          totalRatio += Math.min(0.95, rec.lastPosition / rec.duration);
+        }
+      }
+    }
+
+    const progressPercentage = Math.min(100, Math.round((totalRatio / totalMaterials) * 100));
+    const isCompleted = (completedCount === totalMaterials && totalMaterials > 0) || progressPercentage === 100;
+
+    // Find instructor/contributor name from materials
+    const instructor = allMaterials.find((m) => m.contributorName)?.contributorName || 'Faculty Instructor';
+
+    const courseData = {
+      id: course._id.toString(),
+      name: course.name,
+      code: course.code,
+      departmentId: course.departmentId?.toString() ?? '',
+      instructor,
+      progressPercentage: isCompleted ? 100 : Math.max(progressPercentage, 1),
+      completedVideos: completedCount,
+      totalVideos: totalMaterials,
+      lastPosition: mostRecentRecord?.lastPosition || 0,
+      duration: mostRecentRecord?.duration || 0,
+      lastWatchedVideoId: mostRecentRecord?.materialId?._id?.toString() || null,
+      lastWatchedVideoTitle: mostRecentRecord?.materialId?.title || null,
+      lastWatchedAt,
+    };
+
+    if (isCompleted) {
+      completedCourses.push(courseData);
+    } else if (progressPercentage > 0) {
+      continueLearning.push(courseData);
+    }
+  }
+
+  // Sort continueLearning by most recently watched
+  continueLearning.sort((a, b) => new Date(b.lastWatchedAt) - new Date(a.lastWatchedAt));
+  completedCourses.sort((a, b) => new Date(b.lastWatchedAt) - new Date(a.lastWatchedAt));
+
+  return {
+    continueLearning,
+    completedCourses,
+    completedCount: completedCourses.length,
+    downloads: progressRecords.length,
+    savedNotes: bookmarks.length,
+  };
+};
+
+// ─── GET /api/courses/learning-progress ────────────────────────────────
+const getStudentLearningProgress = async (req, res) => {
+  const data = await getStudentCourseProgressData(req.user._id);
+  res.json(success(data, 'Student learning progress fetched.'));
+};
 
 // ─── Helper: assert faculty_admin / admin owns this course's department ─
 const assertDeptOwnership = (user, course) => {
+  if (user.role === 'super_admin') {
+    throw createError('Super Admins do not manage courses. Department Admins manage courses for their respective departments.', 403);
+  }
   if (user.role === 'faculty_admin' || user.role === 'admin') {
     const courseDeptId = course.departmentId?.toString();
     const userDeptId = user.departmentId?.toString();
@@ -27,6 +134,8 @@ const assertDeptOwnership = (user, course) => {
     } else if (!userDeptId) {
       throw createError('Your account has no department assigned. Contact a Super Admin.', 403);
     }
+  } else {
+    throw createError('Unauthorized to manage courses.', 403);
   }
 };
 
@@ -63,6 +172,10 @@ const getCourseById = async (req, res) => {
 
 // ─── POST /api/courses ────────────────────────────────────────────────
 const createCourse = async (req, res) => {
+  if (req.user.role === 'super_admin') {
+    throw createError('Super Admins do not manage courses. Department Admins manage courses for their respective departments.', 403);
+  }
+
   const { name, code, semester, credit } = req.body;
   let { departmentId } = req.body;
 
@@ -89,6 +202,8 @@ const createCourse = async (req, res) => {
       throw createError('Your account has no department assigned. Contact a Super Admin.', 403);
     }
     departmentId = req.user.departmentId.toString();
+  } else {
+    throw createError('Unauthorized to create courses.', 403);
   }
 
   if (!departmentId) {
@@ -164,4 +279,6 @@ module.exports = {
   updateCourse,
   toggleCourseStatus,
   deleteCourse,
+  getStudentLearningProgress,
+  getStudentCourseProgressData,
 };
