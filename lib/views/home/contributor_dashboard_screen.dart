@@ -73,8 +73,7 @@ class _ContributorDashboardScreenState extends State<ContributorDashboardScreen>
       builder: (_) => UploadResourceScreen(
         initialType: type,
         onUploadSuccess: () {
-          Navigator.of(context).pop();
-          _loadStats();
+          if (mounted) _loadStats();
         },
       ),
     ).then((_) {

@@ -144,19 +144,29 @@ const uploadBuffer = (buffer, folder = 'edushare/materials', originalName) => {
     const isPdf = ext === '.pdf';
 
     // Use 'image' for images so Cloudinary processes transformations;
-    // Use 'raw' or 'auto' for PDFs and documents to preserve the exact file binary.
+    // Use 'raw' for PDFs and documents to preserve the exact file binary and avoid transformation blocks.
     const resourceType = isImage ? 'image' : (isPdf ? 'raw' : 'auto');
 
     const opts = {
       folder,
       resource_type: resourceType,
+      type: 'upload',
+      access_mode: 'public',
       use_filename: true,
       unique_filename: true,
+      overwrite: true,
+      invalidate: true,
     };
 
     if (originalName) {
       const sanitizedBase = path.basename(originalName, ext).replace(/[^a-zA-Z0-9_-]/g, '_');
-      opts.public_id = `${sanitizedBase}_${Date.now()}${ext}`;
+      // For 'raw' resources (PDFs, DOCs), the extension MUST be in the public_id for proper delivery.
+      // For 'image' resources, Cloudinary manages the format extension dynamically — DO NOT append ext.
+      if (resourceType === 'raw') {
+        opts.public_id = `${sanitizedBase}_${Date.now()}${ext}`;
+      } else {
+        opts.public_id = `${sanitizedBase}_${Date.now()}`;
+      }
     }
 
     const uploadStream = cloudinary.uploader.upload_stream(opts, (error, result) => {
@@ -181,13 +191,18 @@ const uploadVideoBuffer = (buffer, folder = 'edushare/videos', originalName) => 
     const opts = {
       folder,
       resource_type: 'video',
+      type: 'upload',
+      access_mode: 'public',
       use_filename: true,
       unique_filename: true,
+      overwrite: true,
+      invalidate: true,
     };
 
     if (originalName) {
       const sanitizedBase = path.basename(originalName, ext).replace(/[^a-zA-Z0-9_-]/g, '_');
-      opts.public_id = `${sanitizedBase}_${Date.now()}${ext || '.mp4'}`;
+      // Video public_ids should not have extension appended
+      opts.public_id = `${sanitizedBase}_${Date.now()}`;
     }
 
     const uploadStream = cloudinary.uploader.upload_stream(opts, (error, result) => {
@@ -206,10 +221,20 @@ const uploadVideoBuffer = (buffer, folder = 'edushare/videos', originalName) => 
  */
 const deleteFile = async (publicId, resourceType = 'raw') => {
   try {
-    await cloudinary.uploader.destroy(publicId, { resource_type: resourceType });
+    await cloudinary.uploader.destroy(publicId, { resource_type: resourceType, invalidate: true });
   } catch (err) {
     console.error(`[Cloudinary] Failed to delete ${publicId}:`, err.message);
   }
 };
 
-module.exports = { upload, uploadDoc, uploadVideo, smartUpload, uploadMaterialFile, uploadBuffer, uploadVideoBuffer, deleteFile };
+module.exports = {
+  cloudinary,
+  upload,
+  uploadDoc,
+  uploadVideo,
+  smartUpload,
+  uploadMaterialFile,
+  uploadBuffer,
+  uploadVideoBuffer,
+  deleteFile,
+};

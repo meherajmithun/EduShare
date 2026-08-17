@@ -647,5 +647,66 @@ class FirestoreService {
     });
     return data as Map<String, dynamic>;
   }
+
+  // ─── Folder Management System (Persistent MongoDB Folders) ────────────
+
+  /// Get student's folders with item counts
+  Future<Map<String, dynamic>> getFolders() async {
+    try {
+      final res = await _api.get('/api/folders');
+      if (res is Map<String, dynamic>) {
+        return res;
+      }
+      return {'folders': [], 'totalSavedCount': 0};
+    } catch (_) {
+      return {'folders': [], 'totalSavedCount': 0};
+    }
+  }
+
+  /// Create a new folder for the current student
+  Future<Map<String, dynamic>> createFolder(String name, {String? color}) async {
+    final res = await _api.post('/api/folders', {
+      'name': name.trim(),
+      if (color != null) 'color': color,
+    });
+    return res as Map<String, dynamic>;
+  }
+
+  /// Rename a folder
+  Future<Map<String, dynamic>> renameFolder(String folderId, String newName, {String? color}) async {
+    final res = await _api.put('/api/folders/$folderId', {
+      'name': newName.trim(),
+      if (color != null) 'color': color,
+    });
+    return res as Map<String, dynamic>;
+  }
+
+  /// Delete a folder and remove its bookmark associations
+  Future<void> deleteFolder(String folderId) async {
+    await _api.delete('/api/folders/$folderId');
+  }
+
+  /// Get materials saved in a specific folder
+  Future<Map<String, dynamic>> getFolderMaterials(String folderId) async {
+    final res = await _api.get('/api/folders/$folderId/materials');
+    return res as Map<String, dynamic>;
+  }
+
+  /// Save a material into a specific folder (prevents duplicates)
+  Future<Map<String, dynamic>> saveMaterialToFolder(
+    String folderId,
+    String materialId, {
+    String? courseId,
+  }) async {
+    final res = await _api.post('/api/folders/$folderId/materials/$materialId', {
+      if (courseId != null) 'courseId': courseId,
+    });
+    return res as Map<String, dynamic>;
+  }
+
+  /// Remove a material from a folder
+  Future<void> removeMaterialFromFolder(String folderId, String materialId) async {
+    await _api.delete('/api/folders/$folderId/materials/$materialId');
+  }
 }
 

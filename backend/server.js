@@ -24,6 +24,7 @@ const superAdminRoutes = require('./routes/superAdminRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
 const contributorRoutes = require('./routes/contributorRoutes');
 const videoRoutes = require('./routes/videoRoutes');
+const folderRoutes = require('./routes/folderRoutes');
 
 // ─── Bootstrap ────────────────────────────────────────────────────────
 const app = express();
@@ -75,6 +76,7 @@ app.use('/api/super-admin', superAdminRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/contributors', contributorRoutes);
 app.use('/api/videos', videoRoutes);
+app.use('/api/folders', folderRoutes);
 
 // ─── 404 handler ─────────────────────────────────────────────────────
 app.use((req, res) => {

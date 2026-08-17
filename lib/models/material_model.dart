@@ -116,21 +116,37 @@ class MaterialModel {
   }
 
   /// True if this material is a PDF file (in-app PDF viewer).
-  bool get isPdf =>
-      type == 'pdf' ||
-      (fileUrl != null && fileUrl!.toLowerCase().contains('.pdf'));
+  bool get isPdf {
+    if (type == 'pdf') return true;
+    if (fileName != null && fileName!.toLowerCase().endsWith('.pdf')) return true;
+    if (fileUrl != null && fileUrl!.toLowerCase().contains('.pdf')) return true;
+    return false;
+  }
 
   /// True if this material is an image file (in-app Image viewer).
   bool get isImage {
+    if (isPdf) return false;
+    if (fileName != null && fileName!.isNotEmpty) {
+      final lowerName = fileName!.toLowerCase();
+      if (lowerName.endsWith('.jpg') ||
+          lowerName.endsWith('.jpeg') ||
+          lowerName.endsWith('.png') ||
+          lowerName.endsWith('.webp') ||
+          lowerName.endsWith('.gif') ||
+          lowerName.endsWith('.bmp')) {
+        return true;
+      }
+    }
     if (fileUrl != null && fileUrl!.isNotEmpty) {
       final lower = fileUrl!.toLowerCase();
+      if (lower.contains('.pdf')) return false;
       return lower.endsWith('.jpg') ||
           lower.endsWith('.jpeg') ||
           lower.endsWith('.png') ||
           lower.endsWith('.webp') ||
           lower.endsWith('.gif') ||
           lower.endsWith('.bmp') ||
-          lower.contains('/image/upload/');
+          (lower.contains('/image/upload/') && !lower.contains('.pdf'));
     }
     return false;
   }

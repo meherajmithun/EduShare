@@ -15,6 +15,7 @@ import 'package:edushare/views/profile/contributor_profile_screen.dart';
 import 'package:edushare/widgets/glass_card.dart';
 import 'package:edushare/widgets/material_rating_sheet.dart';
 import 'package:edushare/widgets/pdf_viewer_screen.dart';
+import 'package:edushare/widgets/save_to_folder_sheet.dart';
 import 'package:intl/intl.dart';
 
 class VideoDetailsScreen extends StatefulWidget {
@@ -487,6 +488,18 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
     }
   }
 
+  void _openSaveToFolderSheet() {
+    SaveToFolderSheet.show(
+      context,
+      materialId: _currentVideo.id,
+      courseId: widget.course.id,
+      materialTitle: _currentVideo.title,
+      onSaved: () {
+        setState(() => _isBookmarked = true);
+      },
+    );
+  }
+
   void _toggleBookmark() async {
     setState(() {
       _isBookmarked = !_isBookmarked;
@@ -629,6 +642,27 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
                                   ),
                                 ),
                                 const SizedBox(width: 12),
+                                // Save to Folder Button
+                                GestureDetector(
+                                  onTap: _openSaveToFolderSheet,
+                                  child: Container(
+                                    width: 44,
+                                    height: 44,
+                                    decoration: BoxDecoration(
+                                      color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Center(
+                                      child: Icon(
+                                        Icons.bookmark_add_outlined,
+                                        color: AppTheme.primaryColor,
+                                        size: 22,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                // Quick Bookmark Toggle
                                 GestureDetector(
                                   onTap: _toggleBookmark,
                                   child: Container(
@@ -929,6 +963,14 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              ListTile(
+                leading: const Icon(Icons.folder_special_rounded, color: AppTheme.primaryColor),
+                title: const Text('Save to Folder', style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _openSaveToFolderSheet();
+                },
+              ),
               ListTile(
                 leading: const Icon(Icons.star_outline_rounded, color: Colors.amber),
                 title: const Text('Rate this Lecture', style: TextStyle(color: Colors.white)),
@@ -1551,16 +1593,43 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen>
                   ],
                 ),
               ),
-              ElevatedButton(
-                onPressed: _toggleBookmark,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _isBookmarked ? const Color(0xFFEF4444) : AppTheme.primaryColor,
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                ),
-                child: Text(
-                  _isBookmarked ? 'Remove' : 'Save',
-                  style: const TextStyle(color: Colors.white, fontSize: 12),
-                ),
+              Column(
+                children: [
+                  ElevatedButton(
+                    onPressed: _openSaveToFolderSheet,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.primaryColor,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      minimumSize: Size.zero,
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.folder_special_rounded, size: 14, color: Colors.white),
+                        SizedBox(width: 4),
+                        Text('Folder', style: TextStyle(color: Colors.white, fontSize: 11)),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  OutlinedButton(
+                    onPressed: _toggleBookmark,
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      minimumSize: Size.zero,
+                      side: BorderSide(
+                        color: _isBookmarked ? Colors.redAccent : AppTheme.primaryColor,
+                      ),
+                    ),
+                    child: Text(
+                      _isBookmarked ? 'Remove' : 'Bookmark',
+                      style: TextStyle(
+                        color: _isBookmarked ? Colors.redAccent : AppTheme.primaryColor,
+                        fontSize: 10,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),

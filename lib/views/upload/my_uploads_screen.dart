@@ -4,9 +4,13 @@ import 'package:edushare/core/theme.dart';
 import 'package:edushare/core/services/auth_service.dart';
 import 'package:edushare/core/services/firestore_service.dart';
 import 'package:edushare/models/material_model.dart';
+import 'package:edushare/models/course_model.dart';
 import 'package:edushare/widgets/glass_card.dart';
 import 'package:edushare/widgets/notification_bell.dart';
 import 'package:edushare/widgets/app_bar_profile_avatar.dart';
+import 'package:edushare/widgets/image_viewer_screen.dart';
+import 'package:edushare/widgets/pdf_viewer_screen.dart';
+import 'package:edushare/views/course/video_details_screen.dart';
 
 /// Shows the current contributor/admin user's own uploaded materials
 /// with live pending / approved / rejected status, assigned reviewer,
@@ -59,6 +63,54 @@ class _MyUploadsScreenState extends State<MyUploadsScreen> {
     _filteredMaterials = status == 'all'
         ? List.from(_myMaterials)
         : _myMaterials.where((m) => m.approvalStatus == status).toList();
+  }
+
+  void _openMaterial(MaterialModel m) {
+    if (m.type == 'video') {
+      final course = CourseModel(
+        id: m.courseId.isNotEmpty ? m.courseId : 'course',
+        name: m.department.isNotEmpty ? m.department : 'Course',
+        code: m.courseId.isNotEmpty ? m.courseId : (m.department.isNotEmpty ? m.department : 'COURSE'),
+        departmentId: m.departmentId.isNotEmpty ? m.departmentId : '',
+      );
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => VideoDetailsScreen(
+            course: course,
+            allCourseVideos: [m],
+            initialVideo: m,
+          ),
+        ),
+      );
+    } else if (m.fileUrl != null && m.fileUrl!.isNotEmpty) {
+      if (m.isImage) {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => ImageViewerScreen(
+              url: m.fileUrl!,
+              title: m.title,
+              materialId: m.id,
+              contributorName: m.contributorName,
+              createdAt: m.createdAt,
+              courseId: m.courseId,
+            ),
+          ),
+        );
+      } else {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => PdfViewerScreen(
+              url: m.fileUrl!,
+              title: m.title,
+              materialId: m.id,
+              contributorName: m.contributorName,
+              createdAt: m.createdAt,
+              courseId: m.courseId,
+            ),
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _delete(MaterialModel mat) async {
@@ -215,6 +267,7 @@ class _MyUploadsScreenState extends State<MyUploadsScreen> {
                                   mat: mat,
                                   theme: theme,
                                   isDark: isDark,
+                                  onTap: () => _openMaterial(mat),
                                   onDelete: () => _delete(mat),
                                 ),
                               );
@@ -287,12 +340,14 @@ class _UploadCard extends StatelessWidget {
   final MaterialModel mat;
   final ThemeData theme;
   final bool isDark;
+  final VoidCallback onTap;
   final VoidCallback onDelete;
 
   const _UploadCard({
     required this.mat,
     required this.theme,
     required this.isDark,
+    required this.onTap,
     required this.onDelete,
   });
 
@@ -346,260 +401,271 @@ class _UploadCard extends StatelessWidget {
     final isRejected = mat.approvalStatus == 'rejected';
     final isPending = mat.approvalStatus == 'pending';
 
-    return GlassCard(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // ── Header: icon + title + status badge ────────────────────
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+    return GestureDetector(
+      onTap: onTap,
+      child: GlassCard(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Header: icon + title + status badge ────────────────────
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: _typeColor().withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(_typeIcon(), color: _typeColor(), size: 20),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        mat.title,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold, fontSize: 14),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        mat.description,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyMedium?.copyWith(fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+                // Status badge
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: statusColor.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: statusColor, width: 1),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(_statusIcon(), color: statusColor, size: 12),
+                      const SizedBox(width: 3),
+                      Text(_statusLabel(),
+                          style: TextStyle(
+                              color: statusColor,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+
+            // ── Meta row ───────────────────────────────────────────────
+            Row(
+              children: [
+                Icon(Icons.folder_outlined,
+                    size: 13, color: theme.disabledColor),
+                const SizedBox(width: 4),
+                Text(_typeLabel(),
+                    style: theme.textTheme.bodyMedium?.copyWith(fontSize: 11)),
+                const SizedBox(width: 12),
+                Icon(Icons.calendar_today_outlined,
+                    size: 13, color: theme.disabledColor),
+                const SizedBox(width: 4),
+                Text(_formatDate(mat.createdAt),
+                    style: theme.textTheme.bodyMedium?.copyWith(fontSize: 11)),
+              ],
+            ),
+
+            // ── Pending: show assigned Faculty Admin ────────────────────
+            if (isPending && mat.assignedAdminName != null) ...[
+              const SizedBox(height: 8),
               Container(
-                padding: const EdgeInsets.all(10),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
                 decoration: BoxDecoration(
-                  color: _typeColor().withOpacity(0.1),
+                  color: const Color(0xFFF59E0B).withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                      color: const Color(0xFFF59E0B).withOpacity(0.35)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.assignment_ind_outlined,
+                        size: 14, color: Color(0xFFF59E0B)),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'Assigned to: ${mat.assignedAdminName}',
+                        style: const TextStyle(
+                            color: Color(0xFFF59E0B),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
+            if (isPending && mat.assignedAdminName == null) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                decoration: BoxDecoration(
+                  color: theme.disabledColor.withOpacity(0.07),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Icon(_typeIcon(), color: _typeColor(), size: 20),
+                child: Row(
+                  children: [
+                    Icon(Icons.info_outline_rounded,
+                        size: 14, color: theme.disabledColor),
+                    const SizedBox(width: 6),
+                    Text(
+                      'No Faculty Admin assigned — Super Admin will review.',
+                      style: theme.textTheme.bodyMedium?.copyWith(fontSize: 11),
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(width: 12),
-              Expanded(
+            ],
+
+            // ── Approved: show who approved + date + review comment ───────
+            if (mat.approvalStatus == 'approved' &&
+                mat.approvedByName != null) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF10B981).withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                      color: const Color(0xFF10B981).withOpacity(0.35)),
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      mat.title,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold, fontSize: 14),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      mat.description,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodyMedium?.copyWith(fontSize: 12),
-                    ),
-                  ],
-                ),
-              ),
-              // Status badge
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: statusColor.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: statusColor, width: 1),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(_statusIcon(), color: statusColor, size: 12),
-                    const SizedBox(width: 3),
-                    Text(_statusLabel(),
-                        style: TextStyle(
-                            color: statusColor,
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold)),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-
-          // ── Meta row ───────────────────────────────────────────────
-          Row(
-            children: [
-              Icon(Icons.folder_outlined,
-                  size: 13, color: theme.disabledColor),
-              const SizedBox(width: 4),
-              Text(_typeLabel(),
-                  style: theme.textTheme.bodyMedium?.copyWith(fontSize: 11)),
-              const SizedBox(width: 12),
-              Icon(Icons.calendar_today_outlined,
-                  size: 13, color: theme.disabledColor),
-              const SizedBox(width: 4),
-              Text(_formatDate(mat.createdAt),
-                  style: theme.textTheme.bodyMedium?.copyWith(fontSize: 11)),
-            ],
-          ),
-
-          // ── Pending: show assigned Faculty Admin ────────────────────
-          if (isPending && mat.assignedAdminName != null) ...[
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF59E0B).withOpacity(0.08),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                    color: const Color(0xFFF59E0B).withOpacity(0.35)),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.assignment_ind_outlined,
-                      size: 14, color: Color(0xFFF59E0B)),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      'Assigned to: ${mat.assignedAdminName}',
-                      style: const TextStyle(
-                          color: Color(0xFFF59E0B),
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-
-          if (isPending && mat.assignedAdminName == null) ...[
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-              decoration: BoxDecoration(
-                color: theme.disabledColor.withOpacity(0.07),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.info_outline_rounded,
-                      size: 14, color: theme.disabledColor),
-                  const SizedBox(width: 6),
-                  Text(
-                    'No Faculty Admin assigned — Super Admin will review.',
-                    style: theme.textTheme.bodyMedium?.copyWith(fontSize: 11),
-                  ),
-                ],
-              ),
-            ),
-          ],
-
-          // ── Approved: show who approved + date + review comment ───────
-          if (mat.approvalStatus == 'approved' &&
-              mat.approvedByName != null) ...[
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-              decoration: BoxDecoration(
-                color: const Color(0xFF10B981).withOpacity(0.08),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                    color: const Color(0xFF10B981).withOpacity(0.35)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(Icons.verified_outlined,
-                          size: 14, color: Color(0xFF10B981)),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          'Approved by ${mat.approvedByName}' +
-                              (mat.approvedAt != null
-                                  ? ' · ${_formatDate(mat.approvedAt!)}'
-                                  : ''),
-                          style: const TextStyle(
-                              color: Color(0xFF10B981),
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600),
+                    Row(
+                      children: [
+                        const Icon(Icons.verified_outlined,
+                            size: 14, color: Color(0xFF10B981)),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            'Approved by ${mat.approvedByName}' +
+                                (mat.approvedAt != null
+                                    ? ' · ${_formatDate(mat.approvedAt!)}'
+                                    : ''),
+                            style: const TextStyle(
+                                color: Color(0xFF10B981),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600),
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
-                  if (mat.reviewComment != null && mat.reviewComment!.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      'Comment: "${mat.reviewComment}"',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                          fontSize: 12,
-                          fontStyle: FontStyle.italic,
-                          color: const Color(0xFF10B981).withOpacity(0.9)),
+                      ],
                     ),
-                  ],
-                ],
-              ),
-            ),
-          ],
-
-          // ── Rejected: show rejection reason ─────────────────────────
-          if (isRejected) ...[
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: const Color(0xFFEF4444).withOpacity(0.07),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                    color: const Color(0xFFEF4444).withOpacity(0.35)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(Icons.cancel_outlined,
-                          size: 14, color: Color(0xFFEF4444)),
-                      const SizedBox(width: 6),
+                    if (mat.reviewComment != null && mat.reviewComment!.isNotEmpty) ...[
+                      const SizedBox(height: 4),
                       Text(
-                        'Rejected${mat.approvedByName != null ? ' by ${mat.approvedByName}' : ''}',
-                        style: const TextStyle(
-                            color: Color(0xFFEF4444),
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold),
+                        'Comment: "${mat.reviewComment}"',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                            fontSize: 12,
+                            fontStyle: FontStyle.italic,
+                            color: const Color(0xFF10B981).withOpacity(0.9)),
                       ),
                     ],
-                  ),
-                  if (mat.rejectionReason != null &&
-                      mat.rejectionReason!.isNotEmpty) ...[
-                    const SizedBox(height: 6),
-                    Text(
-                      'Reason: ${mat.rejectionReason}',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                          fontSize: 12,
-                          color: const Color(0xFFEF4444).withOpacity(0.8)),
-                    ),
                   ],
-                  if (mat.reviewComment != null &&
-                      mat.reviewComment!.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      'Comment: "${mat.reviewComment}"',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                          fontSize: 12,
-                          fontStyle: FontStyle.italic,
-                          color: const Color(0xFFEF4444).withOpacity(0.8)),
-                    ),
-                  ],
-                ],
+                ),
               ),
+            ],
+
+            // ── Rejected: show rejection reason ─────────────────────────
+            if (isRejected) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEF4444).withOpacity(0.07),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                      color: const Color(0xFFEF4444).withOpacity(0.35)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.cancel_outlined,
+                            size: 14, color: Color(0xFFEF4444)),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Rejected${mat.approvedByName != null ? ' by ${mat.approvedByName}' : ''}',
+                          style: const TextStyle(
+                              color: Color(0xFFEF4444),
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                    if (mat.rejectionReason != null &&
+                        mat.rejectionReason!.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        'Reason: ${mat.rejectionReason}',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                            fontSize: 12,
+                            color: const Color(0xFFEF4444).withOpacity(0.8)),
+                      ),
+                    ],
+                    if (mat.reviewComment != null &&
+                        mat.reviewComment!.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        'Comment: "${mat.reviewComment}"',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                            fontSize: 12,
+                            fontStyle: FontStyle.italic,
+                            color: const Color(0xFFEF4444).withOpacity(0.8)),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+
+            const SizedBox(height: 12),
+
+            // ── Action Buttons: Preview & Delete ──────────────────────
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                TextButton.icon(
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppTheme.primaryColor,
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  ),
+                  icon: const Icon(Icons.visibility_outlined, size: 16),
+                  label: const Text('Preview', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                  onPressed: onTap,
+                ),
+                if (mat.approvalStatus != 'approved')
+                  TextButton.icon(
+                    style: TextButton.styleFrom(
+                      foregroundColor: const Color(0xFFEF4444),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    ),
+                    icon: const Icon(Icons.delete_outline_rounded, size: 16),
+                    label: const Text('Delete', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                    onPressed: onDelete,
+                  ),
+              ],
             ),
           ],
-
-          const SizedBox(height: 12),
-
-          // ── Delete button (only for pending/rejected) ────────────────
-          if (mat.approvalStatus != 'approved')
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton.icon(
-                style: TextButton.styleFrom(
-                  foregroundColor: const Color(0xFFEF4444),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                ),
-                icon: const Icon(Icons.delete_outline_rounded, size: 16),
-                label: const Text('Delete',
-                    style:
-                        TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                onPressed: onDelete,
-              ),
-            ),
-        ],
+        ),
       ),
     );
   }

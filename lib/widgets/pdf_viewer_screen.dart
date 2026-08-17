@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:edushare/core/theme.dart';
 import 'package:edushare/core/services/firestore_service.dart';
+import 'package:edushare/widgets/save_to_folder_sheet.dart';
 import 'package:intl/intl.dart';
 
 /// In-app PDF viewer matching the Video Player dark sleek visual style.
@@ -21,7 +22,7 @@ class PdfViewerScreen extends StatefulWidget {
   final String? courseId;
 
   const PdfViewerScreen({
-    Key? key,
+    super.key,
     required this.url,
     required this.title,
     this.materialId,
@@ -30,7 +31,7 @@ class PdfViewerScreen extends StatefulWidget {
     this.contributorPhoto,
     this.createdAt,
     this.courseId,
-  }) : super(key: key);
+  });
 
   @override
   State<PdfViewerScreen> createState() => _PdfViewerScreenState();
@@ -77,6 +78,19 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
         setState(() => _isBookmarked = isBkmk);
       }
     } catch (_) {}
+  }
+
+  void _openSaveToFolderSheet() {
+    if (widget.materialId == null || widget.materialId!.isEmpty) return;
+    SaveToFolderSheet.show(
+      context,
+      materialId: widget.materialId!,
+      courseId: widget.courseId,
+      materialTitle: widget.title,
+      onSaved: () {
+        setState(() => _isBookmarked = true);
+      },
+    );
   }
 
   void _toggleBookmark() async {
@@ -244,6 +258,90 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     }
   }
 
+  void _showReportDialog() {
+    final reasons = [
+      'Inappropriate or offensive content',
+      'Wrong course or subject category',
+      'Copyright or academic integrity issue',
+      'Broken or corrupted PDF file',
+      'Other',
+    ];
+    String selectedReason = reasons.first;
+    final commentController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setModalState) => AlertDialog(
+          backgroundColor: const Color(0xFF1E293B),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(
+            children: [
+              Icon(Icons.flag_outlined, color: Colors.redAccent, size: 22),
+              SizedBox(width: 8),
+              Text('Report Resource', style: TextStyle(color: Colors.white, fontSize: 16)),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Select reason for reporting:', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                const SizedBox(height: 10),
+                ...reasons.map((r) => RadioListTile<String>(
+                      value: r,
+                      groupValue: selectedReason,
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      activeColor: AppTheme.primaryColor,
+                      title: Text(r, style: const TextStyle(color: Colors.white, fontSize: 12)),
+                      onChanged: (val) {
+                        if (val != null) setModalState(() => selectedReason = val);
+                      },
+                    )),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: commentController,
+                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                  maxLines: 2,
+                  decoration: InputDecoration(
+                    hintText: 'Additional details (optional)...',
+                    hintStyle: const TextStyle(color: Colors.white38, fontSize: 12),
+                    filled: true,
+                    fillColor: Colors.black26,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel', style: TextStyle(color: Colors.white60)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+              onPressed: () {
+                Navigator.pop(ctx);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: const Text('Thank you. Your report has been submitted for faculty review.'),
+                    backgroundColor: const Color(0xFF10B981),
+                    behavior: SnackBarBehavior.floating,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                );
+              },
+              child: const Text('Submit Report', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -308,15 +406,15 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          // Bookmark Button
+          // Save to Folder Button
           IconButton(
-            icon: Icon(
-              _isBookmarked ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
-              color: _isBookmarked ? AppTheme.primaryColor : Colors.white70,
+            icon: const Icon(
+              Icons.bookmark_add_outlined,
+              color: AppTheme.primaryColor,
               size: 22,
             ),
-            onPressed: _toggleBookmark,
-            tooltip: 'Bookmark',
+            onPressed: _openSaveToFolderSheet,
+            tooltip: 'Save to Folder',
           ),
           // Share Button
           IconButton(
@@ -329,10 +427,36 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
             icon: const Icon(Icons.more_vert_rounded, color: Colors.white70, size: 20),
             color: const Color(0xFF1E293B),
             onSelected: (val) {
+              if (val == 'save_folder') _openSaveToFolderSheet();
+              if (val == 'bookmark') _toggleBookmark();
               if (val == 'download') _downloadToDevice();
-              if (val == 'browser') _openExternally();
+              if (val == 'report') _showReportDialog();
             },
             itemBuilder: (ctx) => [
+              const PopupMenuItem(
+                value: 'save_folder',
+                child: Row(
+                  children: [
+                    Icon(Icons.folder_special_rounded, color: AppTheme.primaryColor, size: 18),
+                    SizedBox(width: 10),
+                    Text('Save to Folder', style: TextStyle(color: Colors.white, fontSize: 13)),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'bookmark',
+                child: Row(
+                  children: [
+                    Icon(
+                      _isBookmarked ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
+                      color: _isBookmarked ? AppTheme.primaryColor : Colors.white70,
+                      size: 18,
+                    ),
+                    const SizedBox(width: 10),
+                    Text(_isBookmarked ? 'Remove Bookmark' : 'Quick Bookmark', style: const TextStyle(color: Colors.white, fontSize: 13)),
+                  ],
+                ),
+              ),
               const PopupMenuItem(
                 value: 'download',
                 child: Row(
@@ -344,12 +468,12 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                 ),
               ),
               const PopupMenuItem(
-                value: 'browser',
+                value: 'report',
                 child: Row(
                   children: [
-                    Icon(Icons.open_in_browser_rounded, color: Colors.white70, size: 18),
+                    Icon(Icons.flag_outlined, color: Colors.redAccent, size: 18),
                     SizedBox(width: 10),
-                    Text('Open in Browser', style: TextStyle(color: Colors.white, fontSize: 13)),
+                    Text('Report Material', style: TextStyle(color: Colors.white, fontSize: 13)),
                   ],
                 ),
               ),

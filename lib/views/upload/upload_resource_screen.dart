@@ -104,18 +104,18 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
   // ─── Helper to safely read file bytes (handles mobile path + memory) ───
 
   Future<Uint8List?> _getFileBytes(PlatformFile pf) async {
-    if (pf.bytes != null && pf.bytes!.isNotEmpty) {
-      return pf.bytes;
-    }
-    if (pf.path != null && pf.path!.isNotEmpty) {
-      try {
+    try {
+      if (pf.bytes != null && pf.bytes!.isNotEmpty) {
+        return pf.bytes;
+      }
+      if (pf.path != null && pf.path!.isNotEmpty) {
         final file = File(pf.path!);
         if (await file.exists()) {
           return await file.readAsBytes();
         }
-      } catch (e) {
-        debugPrint('Error reading file bytes from path: $e');
       }
+    } catch (e) {
+      debugPrint('Error reading file bytes: $e');
     }
     return null;
   }
@@ -126,11 +126,16 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.video,
-        withData: true,
+        withData: false,
       );
       if (result != null && result.files.isNotEmpty) {
+        final file = result.files.first;
+        if (file.size > 200 * 1024 * 1024) {
+          _showError('Video file exceeds 200 MB limit. Please select a smaller video.');
+          return;
+        }
         setState(() {
-          _selectedFile = result.files.first;
+          _selectedFile = file;
           _videoSource = 'gallery';
         });
       }
@@ -144,11 +149,16 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['mp4', 'mkv', 'mov', 'avi', 'webm', 'mpeg', '3gp', 'flv'],
-        withData: true,
+        withData: false,
       );
       if (result != null && result.files.isNotEmpty) {
+        final file = result.files.first;
+        if (file.size > 200 * 1024 * 1024) {
+          _showError('Video file exceeds 200 MB limit. Please select a smaller video.');
+          return;
+        }
         setState(() {
-          _selectedFile = result.files.first;
+          _selectedFile = file;
           _videoSource = 'file';
         });
       }
@@ -165,8 +175,13 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
         withData: true,
       );
       if (result != null && result.files.isNotEmpty) {
+        final file = result.files.first;
+        if (file.size > 50 * 1024 * 1024) {
+          _showError('PDF file exceeds 50 MB limit.');
+          return;
+        }
         setState(() {
-          _selectedFile = result.files.first;
+          _selectedFile = file;
         });
       }
     } catch (e) {
@@ -182,8 +197,13 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
         withData: true,
       );
       if (result != null && result.files.isNotEmpty) {
+        final file = result.files.first;
+        if (file.size > 50 * 1024 * 1024) {
+          _showError('File exceeds 50 MB limit.');
+          return;
+        }
         setState(() {
-          _selectedFile = result.files.first;
+          _selectedFile = file;
         });
       }
     } catch (e) {
@@ -403,6 +423,7 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
 
       if (mounted) {
         setState(() => _isUploading = false);
+        Navigator.of(context).pop();
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: const Text('Material submitted successfully for admin approval!'),
           backgroundColor: const Color(0xFF10B981),
@@ -410,7 +431,6 @@ class _UploadResourceScreenState extends State<UploadResourceScreen> {
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ));
         widget.onUploadSuccess?.call();
-        Navigator.of(context).pop();
       }
     } catch (e) {
       if (mounted) {

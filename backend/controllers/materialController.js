@@ -410,6 +410,23 @@ const getMaterialProgress = async (req, res) => {
   res.json(success(progress || { currentPage: 1, totalPages: 1, progressPercentage: 0 }));
 };
 
+// ─── GET /api/materials/:id/file ───────────────────────────────────────
+// Secure in-app delivery endpoint for material documents, images, and videos.
+const streamMaterialFile = async (req, res) => {
+  const material = await Material.findById(req.params.id);
+  if (!material) throw createError('Material not found.', 404);
+
+  const targetUrl = material.fileUrl || material.videoLink;
+  if (!targetUrl) {
+    throw createError('No file attached to this material.', 404);
+  }
+
+  // Increment view counter
+  await Material.findByIdAndUpdate(material._id, { $inc: { views: 1 } });
+
+  return res.redirect(targetUrl);
+};
+
 module.exports = {
   getMaterials,
   getMyMaterials,
@@ -422,4 +439,7 @@ module.exports = {
   deleteMaterialRating,
   incrementMaterialView,
   incrementMaterialDownload,
+  saveMaterialProgress,
+  getMaterialProgress,
+  streamMaterialFile,
 };

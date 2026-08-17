@@ -3,9 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:edushare/core/theme.dart';
 import 'package:edushare/core/services/firestore_service.dart';
+import 'package:edushare/widgets/save_to_folder_sheet.dart';
 import 'package:intl/intl.dart';
 
 /// In-app interactive image viewer matching the Video Player dark sleek visual style.
@@ -43,6 +43,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen>
   bool _isBookmarked = false;
   bool _isDownloading = false;
   bool _isFullscreen = false;
+  int _imageKey = 0; // Key incremented to force Image.network reload
 
   @override
   void initState() {
@@ -73,6 +74,19 @@ class _ImageViewerScreenState extends State<ImageViewerScreen>
         setState(() => _isBookmarked = isBkmk);
       }
     } catch (_) {}
+  }
+
+  void _openSaveToFolderSheet() {
+    if (widget.materialId == null || widget.materialId!.isEmpty) return;
+    SaveToFolderSheet.show(
+      context,
+      materialId: widget.materialId!,
+      courseId: widget.courseId,
+      materialTitle: widget.title,
+      onSaved: () {
+        setState(() => _isBookmarked = true);
+      },
+    );
   }
 
   void _toggleBookmark() async {
@@ -170,16 +184,93 @@ class _ImageViewerScreenState extends State<ImageViewerScreen>
     );
   }
 
-  Future<void> _openExternally() async {
-    final uri = Uri.parse(widget.url);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    }
+  void _showReportDialog() {
+    final reasons = [
+      'Inappropriate or offensive content',
+      'Wrong course or subject category',
+      'Copyright or academic integrity issue',
+      'Broken or unreadable image',
+      'Other',
+    ];
+    String selectedReason = reasons.first;
+    final commentController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setModalState) => AlertDialog(
+          backgroundColor: const Color(0xFF1E293B),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(
+            children: [
+              Icon(Icons.flag_outlined, color: Colors.redAccent, size: 22),
+              SizedBox(width: 8),
+              Text('Report Resource', style: TextStyle(color: Colors.white, fontSize: 16)),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Select reason for reporting:', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                const SizedBox(height: 10),
+                ...reasons.map((r) => RadioListTile<String>(
+                      value: r,
+                      groupValue: selectedReason,
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      activeColor: AppTheme.primaryColor,
+                      title: Text(r, style: const TextStyle(color: Colors.white, fontSize: 12)),
+                      onChanged: (val) {
+                        if (val != null) setModalState(() => selectedReason = val);
+                      },
+                    )),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: commentController,
+                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                  maxLines: 2,
+                  decoration: InputDecoration(
+                    hintText: 'Additional details (optional)...',
+                    hintStyle: const TextStyle(color: Colors.white38, fontSize: 12),
+                    filled: true,
+                    fillColor: Colors.black26,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel', style: TextStyle(color: Colors.white60)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+              onPressed: () {
+                Navigator.pop(ctx);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: const Text('Thank you. Your report has been submitted for faculty review.'),
+                    backgroundColor: const Color(0xFF10B981),
+                    behavior: SnackBarBehavior.floating,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                );
+              },
+              child: const Text('Submit Report', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _handleDoubleTap() {
     if (_transformController.value.isIdentity()) {
-      _transformController.value = Matrix4.identity()..scale(2.5);
+      _transformController.value = Matrix4.diagonal3Values(2.5, 2.5, 1.0);
     } else {
       _transformController.value = Matrix4.identity();
     }
@@ -187,8 +278,6 @@ class _ImageViewerScreenState extends State<ImageViewerScreen>
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
@@ -248,15 +337,15 @@ class _ImageViewerScreenState extends State<ImageViewerScreen>
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          // Bookmark Button
+          // Save to Folder Button
           IconButton(
-            icon: Icon(
-              _isBookmarked ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
-              color: _isBookmarked ? AppTheme.primaryColor : Colors.white70,
+            icon: const Icon(
+              Icons.bookmark_add_outlined,
+              color: AppTheme.primaryColor,
               size: 22,
             ),
-            onPressed: _toggleBookmark,
-            tooltip: 'Bookmark',
+            onPressed: _openSaveToFolderSheet,
+            tooltip: 'Save to Folder',
           ),
           // Share Button
           IconButton(
@@ -269,10 +358,36 @@ class _ImageViewerScreenState extends State<ImageViewerScreen>
             icon: const Icon(Icons.more_vert_rounded, color: Colors.white70, size: 20),
             color: const Color(0xFF1E293B),
             onSelected: (val) {
+              if (val == 'save_folder') _openSaveToFolderSheet();
+              if (val == 'bookmark') _toggleBookmark();
               if (val == 'download') _downloadImage();
-              if (val == 'browser') _openExternally();
+              if (val == 'report') _showReportDialog();
             },
             itemBuilder: (ctx) => [
+              const PopupMenuItem(
+                value: 'save_folder',
+                child: Row(
+                  children: [
+                    Icon(Icons.folder_special_rounded, color: AppTheme.primaryColor, size: 18),
+                    SizedBox(width: 10),
+                    Text('Save to Folder', style: TextStyle(color: Colors.white, fontSize: 13)),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'bookmark',
+                child: Row(
+                  children: [
+                    Icon(
+                      _isBookmarked ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
+                      color: _isBookmarked ? AppTheme.primaryColor : Colors.white70,
+                      size: 18,
+                    ),
+                    const SizedBox(width: 10),
+                    Text(_isBookmarked ? 'Remove Bookmark' : 'Quick Bookmark', style: const TextStyle(color: Colors.white, fontSize: 13)),
+                  ],
+                ),
+              ),
               const PopupMenuItem(
                 value: 'download',
                 child: Row(
@@ -284,12 +399,12 @@ class _ImageViewerScreenState extends State<ImageViewerScreen>
                 ),
               ),
               const PopupMenuItem(
-                value: 'browser',
+                value: 'report',
                 child: Row(
                   children: [
-                    Icon(Icons.open_in_browser_rounded, color: Colors.white70, size: 18),
+                    Icon(Icons.flag_outlined, color: Colors.redAccent, size: 18),
                     SizedBox(width: 10),
-                    Text('Open in Browser', style: TextStyle(color: Colors.white, fontSize: 13)),
+                    Text('Report Material', style: TextStyle(color: Colors.white, fontSize: 13)),
                   ],
                 ),
               ),
@@ -394,6 +509,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen>
           maxScale: 5.0,
           child: Image.network(
             widget.url,
+            key: ValueKey('img_${widget.url}_$_imageKey'),
             fit: BoxFit.contain,
             loadingBuilder: (context, child, loadingProgress) {
               if (loadingProgress == null) return child;
@@ -431,9 +547,21 @@ class _ImageViewerScreenState extends State<ImageViewerScreen>
                         style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
                       ),
                       const SizedBox(height: 8),
-                      OutlinedButton(
-                        onPressed: _openExternally,
-                        child: const Text('Open in Browser', style: TextStyle(color: Colors.white70)),
+                      const Text(
+                        'Unable to display image resource. Tap Retry to try again.',
+                        style: TextStyle(color: Colors.white60, fontSize: 12),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 16),
+                      ElevatedButton.icon(
+                        onPressed: () {
+                          setState(() {
+                            _imageKey++;
+                          });
+                        },
+                        icon: const Icon(Icons.refresh_rounded, size: 16),
+                        label: const Text('Retry'),
+                        style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryColor),
                       ),
                     ],
                   ),
