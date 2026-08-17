@@ -6,6 +6,8 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:edushare/core/theme.dart';
+import 'package:edushare/core/app_config.dart';
+import 'package:edushare/core/services/session_service.dart';
 import 'package:edushare/core/services/firestore_service.dart';
 import 'package:edushare/widgets/save_to_folder_sheet.dart';
 import 'package:intl/intl.dart';
@@ -149,19 +151,68 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     });
 
     try {
-      final response = await http.get(Uri.parse(widget.url)).timeout(
-        const Duration(seconds: 60),
-      );
+      final token = await SessionService.instance.getToken();
+      final authHeaders = token != null && token.isNotEmpty
+          ? {'Authorization': 'Bearer $token'}
+          : <String, String>{};
 
-      if (response.statusCode != 200) {
-        throw Exception('Server returned ${response.statusCode}');
+      // Candidate URLs to try in order:
+      // 1. Backend streaming endpoint (bypasses Cloudinary 401 via backend credentials)
+      // 2. Direct widget.url
+      // 3. Fallback normalized Cloudinary variations
+      final candidateUrls = <String>[];
+      if (widget.materialId != null && widget.materialId!.isNotEmpty) {
+        candidateUrls.add('${AppConfig.baseUrl}/api/materials/${widget.materialId}/file');
       }
 
-      final bytes = response.bodyBytes;
+      if (widget.url.isNotEmpty) {
+        candidateUrls.add(widget.url);
+
+        if (widget.url.contains('/image/upload/') && widget.url.toLowerCase().contains('.pdf')) {
+          candidateUrls.add(widget.url.replaceAll('/image/upload/', '/raw/upload/'));
+        } else if (widget.url.contains('/raw/upload/') && widget.url.toLowerCase().contains('.pdf')) {
+          candidateUrls.add(widget.url.replaceAll('/raw/upload/', '/image/upload/'));
+        }
+
+        // Also try with fl_attachment if Cloudinary URL
+        if (widget.url.contains('cloudinary.com') && !widget.url.contains('/fl_attachment/')) {
+          candidateUrls.add(widget.url.replaceFirst('/upload/', '/upload/fl_attachment/'));
+        }
+      }
+
+      final uniqueUrls = candidateUrls.toSet().toList();
+      Uint8List? fileBytes;
+      String? lastError;
+
+      for (final url in uniqueUrls) {
+        try {
+          final isBackendUrl = url.contains(AppConfig.baseUrl);
+          final response = await http
+              .get(
+                Uri.parse(url),
+                headers: isBackendUrl ? authHeaders : null,
+              )
+              .timeout(const Duration(seconds: 40));
+
+          if (response.statusCode == 200 && response.bodyBytes.isNotEmpty) {
+            fileBytes = response.bodyBytes;
+            break;
+          } else {
+            lastError = 'HTTP ${response.statusCode}';
+          }
+        } catch (err) {
+          lastError = err.toString();
+        }
+      }
+
+      if (fileBytes == null || fileBytes.isEmpty) {
+        throw Exception(lastError ?? 'Could not retrieve PDF data.');
+      }
+
       final dir = await getTemporaryDirectory();
       final safeTitle = widget.title.replaceAll(RegExp(r'[^\w\s.-]'), '_');
       final file = File('${dir.path}/$safeTitle.pdf');
-      await file.writeAsBytes(bytes, flush: true);
+      await file.writeAsBytes(fileBytes, flush: true);
 
       if (mounted) {
         setState(() {
@@ -174,7 +225,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
         setState(() {
           _isLoading = false;
           _hasError = true;
-          _errorMessage = 'Could not load PDF: ${e.toString()}';
+          _errorMessage = 'Could not load PDF: ${e.toString().replaceAll("Exception: ", "")}';
         });
       }
     }

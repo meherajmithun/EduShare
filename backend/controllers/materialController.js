@@ -20,13 +20,16 @@
  *   DELETE /api/materials/:id/ratings   — delete own rating
  */
 
+const path = require('path');
+const https = require('https');
+const http = require('http');
 const Material = require('../models/Material');
 const MaterialRating = require('../models/MaterialRating');
 const PdfProgress = require('../models/PdfProgress');
 const User = require('../models/User');
 const Department = require('../models/Department');
 const Course = require('../models/Course');
-const { uploadBuffer, uploadVideoBuffer, deleteFile } = require('../services/cloudinaryService');
+const { uploadBuffer, uploadVideoBuffer, deleteFile, cloudinary } = require('../services/cloudinaryService');
 const { notifyFacultyAdminOnUpload, notifyContributorOnRatingSubmitted, notifyContributorOnRatingUpdated } = require('../services/notificationService');
 const { success, createError } = require('../utils/apiResponse');
 
@@ -412,6 +415,7 @@ const getMaterialProgress = async (req, res) => {
 
 // ─── GET /api/materials/:id/file ───────────────────────────────────────
 // Secure in-app delivery endpoint for material documents, images, and videos.
+// Fetches from Cloudinary using server-side credentials and pipes binary data directly to the client.
 const streamMaterialFile = async (req, res) => {
   const material = await Material.findById(req.params.id);
   if (!material) throw createError('Material not found.', 404);
@@ -421,9 +425,125 @@ const streamMaterialFile = async (req, res) => {
     throw createError('No file attached to this material.', 404);
   }
 
-  // Increment view counter
-  await Material.findByIdAndUpdate(material._id, { $inc: { views: 1 } });
+  // Increment view counter asynchronously
+  Material.findByIdAndUpdate(material._id, { $inc: { views: 1 } }).catch(() => {});
 
+  // Determine Content-Type & extension
+  const ext = (material.fileName ? path.extname(material.fileName) : path.extname(targetUrl)).toLowerCase();
+  let contentType = 'application/octet-stream';
+  if (ext === '.pdf' || material.type === 'pdf' || material.type === 'notes') {
+    contentType = 'application/pdf';
+  } else if (ext === '.png') {
+    contentType = 'image/png';
+  } else if (['.jpg', '.jpeg'].includes(ext)) {
+    contentType = 'image/jpeg';
+  } else if (ext === '.webp') {
+    contentType = 'image/webp';
+  } else if (ext === '.mp4') {
+    contentType = 'video/mp4';
+  }
+
+  const safeFilename = encodeURIComponent(material.fileName || material.title || 'material');
+
+  // Candidate URLs to try
+  const candidateUrls = [];
+
+  // 1. If publicId exists, generate signed URLs via Cloudinary SDK
+  if (material.filePublicId) {
+    const isImage = material.type === 'image' || ['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(ext);
+    const isPdf = ext === '.pdf' || material.type === 'pdf' || material.type === 'notes';
+
+    if (isPdf) {
+      // Try raw signed URL
+      try {
+        candidateUrls.push(cloudinary.url(material.filePublicId, {
+          resource_type: 'raw',
+          sign_url: true,
+          secure: true,
+          type: 'upload',
+        }));
+      } catch (_) {}
+      // Try image signed URL
+      try {
+        candidateUrls.push(cloudinary.url(material.filePublicId, {
+          resource_type: 'image',
+          sign_url: true,
+          secure: true,
+          type: 'upload',
+        }));
+      } catch (_) {}
+    } else if (isImage) {
+      try {
+        candidateUrls.push(cloudinary.url(material.filePublicId, {
+          resource_type: 'image',
+          sign_url: true,
+          secure: true,
+          type: 'upload',
+        }));
+      } catch (_) {}
+    }
+  }
+
+  // 2. Add original targetUrl and URL variations
+  candidateUrls.push(targetUrl);
+  if (targetUrl.includes('/image/upload/') && targetUrl.includes('.pdf')) {
+    candidateUrls.push(targetUrl.replace('/image/upload/', '/raw/upload/'));
+  } else if (targetUrl.includes('/raw/upload/') && targetUrl.includes('.pdf')) {
+    candidateUrls.push(targetUrl.replace('/raw/upload/', '/image/upload/'));
+  }
+
+  const uniqueUrls = [...new Set(candidateUrls.filter(Boolean))];
+
+  // Helper to stream a URL with redirect and basic auth fallback
+  const fetchAndPipe = (urlToFetch) => {
+    return new Promise((resolve, reject) => {
+      const parsed = new URL(urlToFetch);
+      const client = parsed.protocol === 'https:' ? https : http;
+
+      // Add auth header if hitting Cloudinary
+      const headers = {};
+      if (parsed.hostname.includes('cloudinary.com') && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET) {
+        const auth = Buffer.from(`${process.env.CLOUDINARY_API_KEY}:${process.env.CLOUDINARY_API_SECRET}`).toString('base64');
+        headers['Authorization'] = `Basic ${auth}`;
+      }
+
+      const reqStream = client.get(urlToFetch, { headers }, (remoteRes) => {
+        // Follow redirects
+        if ([301, 302, 307, 308].includes(remoteRes.statusCode) && remoteRes.headers.location) {
+          return fetchAndPipe(remoteRes.headers.location).then(resolve).catch(reject);
+        }
+
+        if (remoteRes.statusCode === 200) {
+          res.setHeader('Content-Type', remoteRes.headers['content-type'] || contentType);
+          if (remoteRes.headers['content-length']) {
+            res.setHeader('Content-Length', remoteRes.headers['content-length']);
+          }
+          res.setHeader('Content-Disposition', `inline; filename="${safeFilename}"`);
+          res.setHeader('Cache-Control', 'public, max-age=86400');
+          remoteRes.pipe(res);
+          return resolve(true);
+        }
+
+        remoteRes.resume();
+        reject(new Error(`Status ${remoteRes.statusCode}`));
+      });
+
+      reqStream.on('error', reject);
+      reqStream.setTimeout(25000, () => {
+        reqStream.destroy();
+        reject(new Error('Fetch timeout'));
+      });
+    });
+  };
+
+  for (const url of uniqueUrls) {
+    try {
+      const ok = await fetchAndPipe(url);
+      if (ok) return;
+    } catch (_) {}
+  }
+
+  // Fallback redirect if streaming failed
   return res.redirect(targetUrl);
 };
 

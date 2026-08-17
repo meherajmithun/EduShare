@@ -4,6 +4,8 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:edushare/core/theme.dart';
+import 'package:edushare/core/app_config.dart';
+import 'package:edushare/core/services/session_service.dart';
 import 'package:edushare/core/services/firestore_service.dart';
 import 'package:edushare/widgets/save_to_folder_sheet.dart';
 import 'package:intl/intl.dart';
@@ -20,7 +22,7 @@ class ImageViewerScreen extends StatefulWidget {
   final String? courseId;
 
   const ImageViewerScreen({
-    Key? key,
+    super.key,
     required this.url,
     required this.title,
     this.materialId,
@@ -29,7 +31,7 @@ class ImageViewerScreen extends StatefulWidget {
     this.contributorPhoto,
     this.createdAt,
     this.courseId,
-  }) : super(key: key);
+  });
 
   @override
   State<ImageViewerScreen> createState() => _ImageViewerScreenState();
@@ -43,13 +45,16 @@ class _ImageViewerScreenState extends State<ImageViewerScreen>
   bool _isBookmarked = false;
   bool _isDownloading = false;
   bool _isFullscreen = false;
-  int _imageKey = 0; // Key incremented to force Image.network reload
+  bool _isLoadingImage = true;
+  bool _hasImageError = false;
+  Uint8List? _imageBytes;
 
   @override
   void initState() {
     super.initState();
     _recordView();
     _checkBookmark();
+    _loadImage();
   }
 
   @override
@@ -113,6 +118,77 @@ class _ImageViewerScreenState extends State<ImageViewerScreen>
     }
   }
 
+  Future<void> _loadImage() async {
+    setState(() {
+      _isLoadingImage = true;
+      _hasImageError = false;
+    });
+
+    try {
+      final token = await SessionService.instance.getToken();
+      final authHeaders = token != null && token.isNotEmpty
+          ? {'Authorization': 'Bearer $token'}
+          : <String, String>{};
+
+      final candidateUrls = <String>[];
+      if (widget.materialId != null && widget.materialId!.isNotEmpty) {
+        candidateUrls.add('${AppConfig.baseUrl}/api/materials/${widget.materialId}/file');
+      }
+
+      if (widget.url.isNotEmpty) {
+        candidateUrls.add(widget.url);
+
+        if (widget.url.contains('/upload/') && !widget.url.contains('/f_auto,q_auto/')) {
+          candidateUrls.add(widget.url.replaceFirst('/upload/', '/upload/f_auto,q_auto/'));
+        }
+      }
+
+      final uniqueUrls = candidateUrls.toSet().toList();
+      Uint8List? bytes;
+
+      for (final url in uniqueUrls) {
+        try {
+          final isBackendUrl = url.contains(AppConfig.baseUrl);
+          final res = await http
+              .get(
+                Uri.parse(url),
+                headers: isBackendUrl ? authHeaders : null,
+              )
+              .timeout(const Duration(seconds: 30));
+
+          if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
+            bytes = res.bodyBytes;
+            break;
+          }
+        } catch (_) {}
+      }
+
+      if (bytes != null && bytes.isNotEmpty) {
+        if (mounted) {
+          setState(() {
+            _imageBytes = bytes;
+            _isLoadingImage = false;
+            _hasImageError = false;
+          });
+        }
+      } else {
+        if (mounted) {
+          setState(() {
+            _isLoadingImage = false;
+            _hasImageError = true;
+          });
+        }
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _isLoadingImage = false;
+          _hasImageError = true;
+        });
+      }
+    }
+  }
+
   Future<void> _downloadImage() async {
     if (widget.materialId != null && widget.materialId!.isNotEmpty) {
       _firestoreService.incrementMaterialDownload(widget.materialId!);
@@ -120,12 +196,18 @@ class _ImageViewerScreenState extends State<ImageViewerScreen>
     setState(() => _isDownloading = true);
 
     try {
-      final response = await http.get(Uri.parse(widget.url)).timeout(
-        const Duration(seconds: 30),
-      );
+      Uint8List? bytes = _imageBytes;
+      if (bytes == null || bytes.isEmpty) {
+        final response = await http.get(Uri.parse(widget.url)).timeout(
+          const Duration(seconds: 30),
+        );
+        if (response.statusCode == 200) {
+          bytes = response.bodyBytes;
+        }
+      }
 
-      if (response.statusCode != 200) {
-        throw Exception('Server returned ${response.statusCode}');
+      if (bytes == null || bytes.isEmpty) {
+        throw Exception('Unable to download image data');
       }
 
       final ext = widget.url.toLowerCase().endsWith('.png') ? '.png' : '.jpg';
@@ -143,7 +225,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen>
 
       if (dir != null) {
         final file = File('${dir.path}/$safeTitle$ext');
-        await file.writeAsBytes(response.bodyBytes);
+        await file.writeAsBytes(bytes);
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -159,6 +241,8 @@ class _ImageViewerScreenState extends State<ImageViewerScreen>
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text('Download failed: ${e.toString()}'),
           backgroundColor: Colors.redAccent,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         ));
       }
     } finally {
@@ -500,6 +584,54 @@ class _ImageViewerScreenState extends State<ImageViewerScreen>
   }
 
   Widget _buildImageSurface() {
+    if (_isLoadingImage) {
+      return const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(color: AppTheme.primaryColor),
+            SizedBox(height: 12),
+            Text(
+              'Loading Image...',
+              style: TextStyle(color: Colors.white70, fontSize: 13),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_hasImageError || _imageBytes == null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.broken_image_rounded, size: 56, color: Colors.redAccent),
+              const SizedBox(height: 12),
+              const Text(
+                'Could not load image',
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Unable to display image resource. Tap Retry to try again.',
+                style: TextStyle(color: Colors.white60, fontSize: 12),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                onPressed: _loadImage,
+                icon: const Icon(Icons.refresh_rounded, size: 16),
+                label: const Text('Retry'),
+                style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryColor),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return GestureDetector(
       onDoubleTap: _handleDoubleTap,
       child: Center(
@@ -507,64 +639,23 @@ class _ImageViewerScreenState extends State<ImageViewerScreen>
           transformationController: _transformController,
           minScale: 0.8,
           maxScale: 5.0,
-          child: Image.network(
-            widget.url,
-            key: ValueKey('img_${widget.url}_$_imageKey'),
+          child: Image.memory(
+            _imageBytes!,
             fit: BoxFit.contain,
-            loadingBuilder: (context, child, loadingProgress) {
-              if (loadingProgress == null) return child;
-              final expected = loadingProgress.expectedTotalBytes;
-              final loaded = loadingProgress.cumulativeBytesLoaded;
-              final progress = expected != null ? loaded / expected : null;
+            errorBuilder: (context, error, stackTrace) {
               return Center(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    CircularProgressIndicator(
-                      value: progress,
-                      color: AppTheme.primaryColor,
-                    ),
+                    const Icon(Icons.broken_image_rounded, size: 56, color: Colors.redAccent),
                     const SizedBox(height: 12),
-                    const Text(
-                      'Loading Image...',
-                      style: TextStyle(color: Colors.white70, fontSize: 13),
+                    const Text('Error rendering image', style: TextStyle(color: Colors.white)),
+                    const SizedBox(height: 12),
+                    ElevatedButton(
+                      onPressed: _loadImage,
+                      child: const Text('Retry'),
                     ),
                   ],
-                ),
-              );
-            },
-            errorBuilder: (context, error, stackTrace) {
-              return Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.broken_image_rounded, size: 56, color: Colors.redAccent),
-                      const SizedBox(height: 12),
-                      const Text(
-                        'Could not load image',
-                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
-                      ),
-                      const SizedBox(height: 8),
-                      const Text(
-                        'Unable to display image resource. Tap Retry to try again.',
-                        style: TextStyle(color: Colors.white60, fontSize: 12),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 16),
-                      ElevatedButton.icon(
-                        onPressed: () {
-                          setState(() {
-                            _imageKey++;
-                          });
-                        },
-                        icon: const Icon(Icons.refresh_rounded, size: 16),
-                        label: const Text('Retry'),
-                        style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryColor),
-                      ),
-                    ],
-                  ),
                 ),
               );
             },
