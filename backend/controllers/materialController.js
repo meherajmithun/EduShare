@@ -490,46 +490,65 @@ const streamMaterialFile = async (req, res) => {
 
   const safeFilename = encodeURIComponent(material.fileName || material.title || 'material');
 
-  // Candidate URLs to try
+  // Extract public ID from stored field or URL
+  let publicId = material.filePublicId;
+  if (!publicId && targetUrl.includes('cloudinary.com')) {
+    const match = targetUrl.match(/\/upload\/(?:(?:[a-zA-Z0-9_,]+)\/)?(?:v\d+\/)?([^\?#]+)$/);
+    if (match && match[1]) {
+      publicId = match[1].replace(/\.[^/.]+$/, '');
+    }
+  }
+
+  // Build candidate URLs to fetch
   const candidateUrls = [];
 
-  // 1. If publicId exists, generate signed URLs via Cloudinary SDK
-  if (material.filePublicId) {
+  // 1. fl_attachment delivery (Cloudinary's standard way to deliver PDF binaries from image/upload)
+  if (targetUrl.includes('/image/upload/') && (targetUrl.includes('.pdf') || contentType === 'application/pdf')) {
+    candidateUrls.push(targetUrl.replace('/image/upload/', '/image/upload/fl_attachment/'));
+    candidateUrls.push(targetUrl.replace('/image/upload/', '/image/upload/fl_attachment,fl_sanitize/'));
+  }
+
+  // 2. Signed Cloudinary URLs
+  if (publicId) {
     const isImage = material.type === 'image' || ['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(ext);
     const isPdf = ext === '.pdf' || material.type === 'pdf' || material.type === 'notes';
 
     if (isPdf) {
-      // Try raw signed URL
       try {
-        candidateUrls.push(cloudinary.url(material.filePublicId, {
+        candidateUrls.push(cloudinary.url(publicId, {
+          resource_type: 'image',
+          format: 'pdf',
+          flags: 'attachment',
+          sign_url: true,
+          secure: true,
+        }));
+      } catch (_) {}
+      try {
+        candidateUrls.push(cloudinary.url(publicId, {
           resource_type: 'raw',
           sign_url: true,
           secure: true,
-          type: 'upload',
         }));
       } catch (_) {}
-      // Try image signed URL
       try {
-        candidateUrls.push(cloudinary.url(material.filePublicId, {
+        candidateUrls.push(cloudinary.utils.private_download_url(publicId, 'pdf', {
           resource_type: 'image',
-          sign_url: true,
-          secure: true,
           type: 'upload',
+          expires_at: Math.floor(Date.now() / 1000) + 3600,
         }));
       } catch (_) {}
     } else if (isImage) {
       try {
-        candidateUrls.push(cloudinary.url(material.filePublicId, {
+        candidateUrls.push(cloudinary.url(publicId, {
           resource_type: 'image',
           sign_url: true,
           secure: true,
-          type: 'upload',
         }));
       } catch (_) {}
     }
   }
 
-  // 2. Add original targetUrl and URL variations
+  // 3. Original target URL and raw/image swap
   candidateUrls.push(targetUrl);
   if (targetUrl.includes('/image/upload/') && targetUrl.includes('.pdf')) {
     candidateUrls.push(targetUrl.replace('/image/upload/', '/raw/upload/'));
@@ -539,21 +558,13 @@ const streamMaterialFile = async (req, res) => {
 
   const uniqueUrls = [...new Set(candidateUrls.filter(Boolean))];
 
-  // Helper to stream a URL with redirect and basic auth fallback
+  // Helper to stream a URL with redirect handling
   const fetchAndPipe = (urlToFetch) => {
     return new Promise((resolve, reject) => {
       const parsed = new URL(urlToFetch);
       const client = parsed.protocol === 'https:' ? https : http;
 
-      // Add auth header if hitting Cloudinary
-      const headers = {};
-      if (parsed.hostname.includes('cloudinary.com') && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET) {
-        const auth = Buffer.from(`${process.env.CLOUDINARY_API_KEY}:${process.env.CLOUDINARY_API_SECRET}`).toString('base64');
-        headers['Authorization'] = `Basic ${auth}`;
-      }
-
-      const reqStream = client.get(urlToFetch, { headers }, (remoteRes) => {
-        // Follow redirects
+      const reqStream = client.get(urlToFetch, (remoteRes) => {
         if ([301, 302, 307, 308].includes(remoteRes.statusCode) && remoteRes.headers.location) {
           return fetchAndPipe(remoteRes.headers.location).then(resolve).catch(reject);
         }
@@ -588,8 +599,7 @@ const streamMaterialFile = async (req, res) => {
     } catch (_) {}
   }
 
-  // Fallback redirect if streaming failed
-  return res.redirect(targetUrl);
+  return res.status(502).json(createError('Unable to stream file from storage provider.', 502));
 };
 
 module.exports = {

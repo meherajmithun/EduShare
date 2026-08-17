@@ -131,16 +131,16 @@ class _ImageViewerScreenState extends State<ImageViewerScreen>
           : <String, String>{};
 
       final candidateUrls = <String>[];
-      if (widget.materialId != null && widget.materialId!.isNotEmpty) {
-        candidateUrls.add('${AppConfig.baseUrl}/api/materials/${widget.materialId}/file');
-      }
-
       if (widget.url.isNotEmpty) {
         candidateUrls.add(widget.url);
 
         if (widget.url.contains('/upload/') && !widget.url.contains('/f_auto,q_auto/')) {
           candidateUrls.add(widget.url.replaceFirst('/upload/', '/upload/f_auto,q_auto/'));
         }
+      }
+
+      if (widget.materialId != null && widget.materialId!.isNotEmpty) {
+        candidateUrls.add('${AppConfig.baseUrl}/api/materials/${widget.materialId}/file');
       }
 
       final uniqueUrls = candidateUrls.toSet().toList();

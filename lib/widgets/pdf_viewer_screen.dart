@@ -157,27 +157,29 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
           : <String, String>{};
 
       // Candidate URLs to try in order:
-      // 1. Backend streaming endpoint (bypasses Cloudinary 401 via backend credentials)
-      // 2. Direct widget.url
-      // 3. Fallback normalized Cloudinary variations
+      // 1. fl_attachment delivery (Cloudinary's standard way to deliver PDF binaries from image/upload)
+      // 2. Backend streaming proxy endpoint
+      // 3. Direct widget.url & raw/image variations
       final candidateUrls = <String>[];
-      if (widget.materialId != null && widget.materialId!.isNotEmpty) {
-        candidateUrls.add('${AppConfig.baseUrl}/api/materials/${widget.materialId}/file');
-      }
 
       if (widget.url.isNotEmpty) {
-        candidateUrls.add(widget.url);
-
         if (widget.url.contains('/image/upload/') && widget.url.toLowerCase().contains('.pdf')) {
+          candidateUrls.add(widget.url.replaceFirst('/image/upload/', '/image/upload/fl_attachment/'));
+          candidateUrls.add(widget.url.replaceFirst('/image/upload/', '/image/upload/fl_attachment,fl_sanitize/'));
           candidateUrls.add(widget.url.replaceAll('/image/upload/', '/raw/upload/'));
         } else if (widget.url.contains('/raw/upload/') && widget.url.toLowerCase().contains('.pdf')) {
-          candidateUrls.add(widget.url.replaceAll('/raw/upload/', '/image/upload/'));
+          candidateUrls.add(widget.url);
+          candidateUrls.add(widget.url.replaceAll('/raw/upload/', '/image/upload/fl_attachment/'));
         }
 
-        // Also try with fl_attachment if Cloudinary URL
         if (widget.url.contains('cloudinary.com') && !widget.url.contains('/fl_attachment/')) {
           candidateUrls.add(widget.url.replaceFirst('/upload/', '/upload/fl_attachment/'));
         }
+        candidateUrls.add(widget.url);
+      }
+
+      if (widget.materialId != null && widget.materialId!.isNotEmpty) {
+        candidateUrls.add('${AppConfig.baseUrl}/api/materials/${widget.materialId}/file');
       }
 
       final uniqueUrls = candidateUrls.toSet().toList();
