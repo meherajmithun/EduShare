@@ -71,28 +71,61 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadData() async {
     try {
       final depts = await _firestoreService.getDepartments();
-
-      // Load courses for current user's department first, then all others
       final user = context.read<AuthService>().currentUser;
-      List<CourseModel> courses = [];
-      if (user != null && user.departmentId != null && user.departmentId!.isNotEmpty) {
-        // Prefer the user's own department courses first
-        final myDeptCourses = await _firestoreService.getCourses(user.departmentId!);
-        courses.addAll(myDeptCourses);
+      final isStudent = user != null && user.isStudent;
+
+      DepartmentModel? studentDept;
+      if (user != null) {
+        if (depts.isNotEmpty) {
+          studentDept = depts.firstWhere(
+            (d) =>
+                (user.departmentId != null && d.id == user.departmentId) ||
+                d.code.toLowerCase() == user.department.toLowerCase() ||
+                d.name.toLowerCase() == user.department.toLowerCase() ||
+                user.department.toLowerCase().contains(d.code.toLowerCase()),
+            orElse: () => DepartmentModel(
+              id: user.departmentId ?? '',
+              name: user.department,
+              code: user.department.length > 5
+                  ? user.department.substring(0, 3).toUpperCase()
+                  : (user.department.isNotEmpty ? user.department.toUpperCase() : 'DEPT'),
+              description: '',
+              isActive: true,
+            ),
+          );
+        } else if (user.department.isNotEmpty) {
+          studentDept = DepartmentModel(
+            id: user.departmentId ?? '',
+            name: user.department,
+            code: user.department.length > 5
+                ? user.department.substring(0, 3).toUpperCase()
+                : user.department.toUpperCase(),
+            description: '',
+            isActive: true,
+          );
+        }
       }
-      // Also load other departments' courses so filters work
-      for (var dept in depts) {
-        if (user?.departmentId == dept.id) continue; // already loaded
-        final deptCourses = await _firestoreService.getCourses(dept.id);
-        courses.addAll(deptCourses);
+
+      List<CourseModel> courses = [];
+      if (isStudent && studentDept != null) {
+        // Students ONLY see courses from their own department
+        courses = await _firestoreService.getCourses(studentDept.id);
+      } else {
+        if (user != null && user.departmentId != null && user.departmentId!.isNotEmpty) {
+          final myDeptCourses = await _firestoreService.getCourses(user.departmentId!);
+          courses.addAll(myDeptCourses);
+        }
+        for (var dept in depts) {
+          if (user?.departmentId == dept.id) continue;
+          final deptCourses = await _firestoreService.getCourses(dept.id);
+          courses.addAll(deptCourses);
+        }
       }
 
       final materials = await _firestoreService.getMaterials();
       final approved = materials.where((m) => m.isApproved).toList();
-      // Sort trending by views descending
       approved.sort((a, b) => b.views.compareTo(a.views));
 
-      // Load real student learning progress (continue learning & completed courses)
       final progressData = await _firestoreService.getStudentLearningProgress();
       final contList = (progressData['continueLearning'] as List<dynamic>? ?? [])
           .map((e) => StudentCourseProgressModel.fromJson(e as Map<String, dynamic>))
@@ -103,7 +136,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (mounted) {
         setState(() {
-          _departments = depts;
+          _departments = isStudent
+              ? (studentDept != null ? [studentDept] : [])
+              : depts;
+          _selectedDept = isStudent ? studentDept : null;
           _allCourses = courses;
           _filteredCourses = courses;
           _trendingMaterials = approved.take(10).toList();
@@ -471,30 +507,32 @@ class _HomeScreenState extends State<HomeScreen> {
                         scrollDirection: Axis.horizontal,
                         child: Row(
                           children: [
-                            Padding(
-                              padding: const EdgeInsets.only(right: 8),
-                              child: ChoiceChip(
-                                label: const Text('All'),
-                                selected: _selectedDept == null,
-                                selectedColor: AppTheme.primaryColor,
-                                backgroundColor:
-                                    isDark ? AppTheme.darkSurface : AppTheme.lightCard,
-                                labelStyle: TextStyle(
-                                  color: _selectedDept == null
-                                      ? Colors.white
-                                      : (isDark
-                                          ? AppTheme.darkTextSecondary
-                                          : AppTheme.lightTextSecondary),
-                                  fontWeight: _selectedDept == null
-                                      ? FontWeight.bold
-                                      : FontWeight.normal,
-                                  fontSize: 12,
+                            if (currentUser != null && !currentUser.isStudent)
+                              Padding(
+                                padding: const EdgeInsets.only(right: 8),
+                                child: ChoiceChip(
+                                  label: const Text('All'),
+                                  selected: _selectedDept == null,
+                                  selectedColor: AppTheme.primaryColor,
+                                  backgroundColor:
+                                      isDark ? AppTheme.darkSurface : AppTheme.lightCard,
+                                  labelStyle: TextStyle(
+                                    color: _selectedDept == null
+                                        ? Colors.white
+                                        : (isDark
+                                            ? AppTheme.darkTextSecondary
+                                            : AppTheme.lightTextSecondary),
+                                    fontWeight: _selectedDept == null
+                                        ? FontWeight.bold
+                                        : FontWeight.normal,
+                                    fontSize: 12,
+                                  ),
+                                  onSelected: (_) => _selectDepartment(null),
                                 ),
-                                onSelected: (_) => _selectDepartment(null),
                               ),
-                            ),
                             ..._departments.map((dept) {
-                              final isSel = _selectedDept?.id == dept.id;
+                              final isStudent = currentUser != null && currentUser.isStudent;
+                              final isSel = isStudent || _selectedDept?.id == dept.id;
                               return Padding(
                                 padding: const EdgeInsets.only(right: 8),
                                 child: ChoiceChip(
@@ -513,7 +551,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                         isSel ? FontWeight.bold : FontWeight.normal,
                                     fontSize: 12,
                                   ),
-                                  onSelected: (_) => _selectDepartment(dept),
+                                  onSelected: isStudent ? null : (_) => _selectDepartment(dept),
                                 ),
                               );
                             }),

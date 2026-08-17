@@ -29,9 +29,13 @@ const getUsers = async (req, res) => {
   if (role) filter.role = role;
   if (status) filter.status = status;
 
-  // Faculty Admin scoping — only see their own department
-  if (req.user.role === 'faculty_admin' && req.user.department) {
-    filter.department = req.user.department;
+  // Student and Faculty Admin scoping — only see their own department
+  if (['student', 'faculty_admin'].includes(req.user.role)) {
+    if (req.user.departmentId) {
+      filter.departmentId = req.user.departmentId;
+    } else if (req.user.department) {
+      filter.department = req.user.department;
+    }
   }
 
   // Hide super_admin accounts from non-super_admin users

@@ -39,6 +39,11 @@ class UserModel {
     required this.createdAt,
   });
 
+  bool get isStudent => role == 'student';
+  bool get isContributor => role == 'contributor';
+  bool get isAdmin => role == 'admin' || role == 'faculty_admin';
+  bool get isSuperAdmin => role == 'super_admin';
+
   UserModel copyWith({
     String? uid,
     String? name,

@@ -87,8 +87,20 @@ const getMaterials = async (req, res) => {
   if (courseId) filter.courseId = courseId;
   if (type) filter.type = type;
 
-  // Department-based access: students and contributors only see materials from their dept
-  if (req.user && (req.user.role === 'student' || req.user.role === 'contributor') && req.user.departmentId) {
+  // Department-based access: students ONLY see materials from their own dept
+  if (req.user && req.user.role === 'student') {
+    let studentDeptId = req.user.departmentId;
+    if (!studentDeptId && req.user.department) {
+      const dept = await Department.findOne({
+        $or: [
+          { name: new RegExp('^' + req.user.department.trim() + '$', 'i') },
+          { code: new RegExp('^' + req.user.department.trim() + '$', 'i') },
+        ],
+      });
+      if (dept) studentDeptId = dept._id;
+    }
+    filter.departmentId = studentDeptId ? studentDeptId.toString() : '000000000000000000000000';
+  } else if (req.user && req.user.role === 'contributor' && req.user.departmentId) {
     filter.departmentId = req.user.departmentId.toString();
   }
 
@@ -108,6 +120,23 @@ const getMyMaterials = async (req, res) => {
 const getMaterialById = async (req, res) => {
   const material = await Material.findById(req.params.id);
   if (!material) throw createError('Material not found.', 404);
+
+  if (req.user && req.user.role === 'student') {
+    let studentDeptId = req.user.departmentId?.toString();
+    if (!studentDeptId && req.user.department) {
+      const dept = await Department.findOne({
+        $or: [
+          { name: new RegExp('^' + req.user.department.trim() + '$', 'i') },
+          { code: new RegExp('^' + req.user.department.trim() + '$', 'i') },
+        ],
+      });
+      if (dept) studentDeptId = dept._id.toString();
+    }
+    if (studentDeptId && material.departmentId && material.departmentId.toString() !== studentDeptId) {
+      throw createError('Access denied. You can only view materials from your own department.', 403);
+    }
+  }
+
   res.json(success(material));
 };
 
@@ -419,6 +448,22 @@ const getMaterialProgress = async (req, res) => {
 const streamMaterialFile = async (req, res) => {
   const material = await Material.findById(req.params.id);
   if (!material) throw createError('Material not found.', 404);
+
+  if (req.user && req.user.role === 'student') {
+    let studentDeptId = req.user.departmentId?.toString();
+    if (!studentDeptId && req.user.department) {
+      const dept = await Department.findOne({
+        $or: [
+          { name: new RegExp('^' + req.user.department.trim() + '$', 'i') },
+          { code: new RegExp('^' + req.user.department.trim() + '$', 'i') },
+        ],
+      });
+      if (dept) studentDeptId = dept._id.toString();
+    }
+    if (studentDeptId && material.departmentId && material.departmentId.toString() !== studentDeptId) {
+      throw createError('Access denied. You can only view materials from your own department.', 403);
+    }
+  }
 
   const targetUrl = material.fileUrl || material.videoLink;
   if (!targetUrl) {

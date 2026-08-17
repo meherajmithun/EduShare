@@ -144,13 +144,23 @@ const getCourses = async (req, res) => {
   const { departmentId, includeAll } = req.query;
 
   const filter = {};
-  if (['student', 'contributor'].includes(req.user?.role) && req.user?.departmentId) {
-    // Students and contributors ONLY see courses from their department
+  if (['student', 'contributor'].includes(req.user?.role)) {
+    // Students and contributors ONLY see courses from their own department
+    let deptId = req.user.departmentId;
+    if (!deptId && req.user.department) {
+      const dept = await Department.findOne({
+        $or: [
+          { name: new RegExp('^' + req.user.department.trim() + '$', 'i') },
+          { code: new RegExp('^' + req.user.department.trim() + '$', 'i') },
+        ],
+      });
+      if (dept) deptId = dept._id;
+    }
+    filter.departmentId = deptId || '000000000000000000000000';
+  } else if (['faculty_admin', 'admin'].includes(req.user?.role) && req.user?.departmentId) {
     filter.departmentId = req.user.departmentId;
   } else if (departmentId) {
     filter.departmentId = departmentId;
-  } else if (['faculty_admin', 'admin'].includes(req.user?.role) && req.user?.departmentId) {
-    filter.departmentId = req.user.departmentId;
   }
 
   // By default only return active courses; admins can pass includeAll=true
@@ -167,6 +177,24 @@ const getCourses = async (req, res) => {
 const getCourseById = async (req, res) => {
   const course = await Course.findById(req.params.id).populate('departmentId', 'name code');
   if (!course) throw createError('Course not found.', 404);
+
+  if (req.user?.role === 'student') {
+    let studentDeptId = req.user.departmentId?.toString();
+    if (!studentDeptId && req.user.department) {
+      const dept = await Department.findOne({
+        $or: [
+          { name: new RegExp('^' + req.user.department.trim() + '$', 'i') },
+          { code: new RegExp('^' + req.user.department.trim() + '$', 'i') },
+        ],
+      });
+      if (dept) studentDeptId = dept._id.toString();
+    }
+    const courseDeptId = (course.departmentId?._id || course.departmentId)?.toString();
+    if (studentDeptId && courseDeptId && courseDeptId !== studentDeptId) {
+      throw createError('Access denied. You can only view courses from your own department.', 403);
+    }
+  }
+
   res.json(success(course));
 };
 
